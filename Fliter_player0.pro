@@ -18,17 +18,29 @@ DEFINES += QT_DEPRECATED_WARNINGS
 SOURCES += \
     ctrlbar.cpp \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    playlist.cpp \
+    showindow.cpp \
+    titlebar.cpp
 
 HEADERS += \
     ctrlbar.h \
-    mainwindow.h
+    mainwindow.h \
+    playlist.h \
+    showindow.h \
+    titlebar.h
 
 FORMS += \
     ctrlbar.ui \
-    mainwindow.ui
+    mainwindow.ui \
+    playlist.ui \
+    showindow.ui \
+    titlebar.ui
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
+
+RESOURCES += \
+    icon.qrc
