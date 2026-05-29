@@ -31,3 +31,5 @@
 *.out
 *.app
 *.user
+/ffmpeg-4.2.1-win32-dev
+/SDL2-2.0.10

@@ -17,15 +17,20 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
     ctrlbar.cpp \
+    ffmsg_queue.cpp \
     main.cpp \
     mainwindow.cpp \
+    playercore.cpp \
     playlist.cpp \
     showindow.cpp \
     titlebar.cpp
 
 HEADERS += \
     ctrlbar.h \
+    ffmsg.h \
+    ffmsg_queue.h \
     mainwindow.h \
+    playercore.h \
     playlist.h \
     showindow.h \
     titlebar.h
@@ -36,6 +41,23 @@ FORMS += \
     playlist.ui \
     showindow.ui \
     titlebar.ui
+
+win32 {
+INCLUDEPATH += $$PWD/SDL2-2.0.10/include
+INCLUDEPATH += $$PWD/ffmpeg-4.2.1-win32-dev/include
+LIBS += $$PWD/SDL2-2.0.10/lib/x86/SDL2.lib  \
+        $$PWD/ffmpeg-4.2.1-win32-dev/lib/avformat.lib   \
+        $$PWD/ffmpeg-4.2.1-win32-dev/lib/avcodec.lib    \
+        $$PWD/ffmpeg-4.2.1-win32-dev/lib/avdevice.lib   \
+        $$PWD/ffmpeg-4.2.1-win32-dev/lib/avfilter.lib   \
+        $$PWD/ffmpeg-4.2.1-win32-dev/lib/avutil.lib     \
+        $$PWD/ffmpeg-4.2.1-win32-dev/lib/postproc.lib   \
+        $$PWD/ffmpeg-4.2.1-win32-dev/lib/swresample.lib \
+        $$PWD/ffmpeg-4.2.1-win32-dev/lib/swscale.lib    \
+        "C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x86\Ole32.Lib"
+}
+
+
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin
