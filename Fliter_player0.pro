@@ -17,20 +17,22 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
     ctrlbar.cpp \
+    fffplay.cpp \
     ffmsg_queue.cpp \
+    ijkplayercore.cpp \
     main.cpp \
     mainwindow.cpp \
-    playercore.cpp \
     playlist.cpp \
     showindow.cpp \
     titlebar.cpp
 
 HEADERS += \
     ctrlbar.h \
+    fffplay.h \
     ffmsg.h \
     ffmsg_queue.h \
+    ijkplayercore.h \
     mainwindow.h \
-    playercore.h \
     playlist.h \
     showindow.h \
     titlebar.h
