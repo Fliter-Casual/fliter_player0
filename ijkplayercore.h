@@ -1,3 +1,4 @@
+// UI界面和FFplayer之间的桥梁
 #ifndef PLAYERCORE_H
 #define PLAYERCORE_H
 

@@ -22,12 +22,13 @@ CtrlBar::~CtrlBar()
     delete ui;
 }
 
-void CtrlBar::on_play_clicked()
+void CtrlBar::on_playOrPauseBtn_clicked()
 {
-    qDebug() << "display video";
+    qDebug() << "on_playOrPauseBtn_clicked";
+    emit SigPlayOrPause();      // 发送信号，这里只发送信号具体是播放还是暂停由播放逻辑判断。
 }
 
 void CtrlBar::on_stop_clicked()
 {
-    qDebug() << "stop video";
+    qDebug() << "on_stop_clicked";
 }

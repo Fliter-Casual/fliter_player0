@@ -19,6 +19,6 @@
 
 #define FFP_REQ_START                       20001       // 核心播放器已经准备好了，请求ui模块调用start
 #define FFP_REQ_PAUSE                       20002       // ui模块请求暂停
-#define FFP_REQ_SEEK
+#define FFP_REQ_SEEK                        20003       // ui模块请求seek位置
 
 #endif // FFMSG_H

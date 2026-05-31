@@ -1,3 +1,4 @@
+// UI界面和FFplayer之间的桥梁
 #include "ijkplayercore.h"
 #include <iostream>
 #include <string.h>
@@ -5,9 +6,15 @@
 
 IjkPlayerCore::IjkPlayerCore ()
 {
-
+    std::cout << " IjkPlayerCore()" << std::endl;
 }
 
+IjkPlayerCore::~IjkPlayerCore()
+{
+    std::cout << " ~IjkPlayerCore()" << std::endl;
+}
+
+// 创建播放器,参数是一个函数指针，指向创建的message_loop，即消息循环函数
 int IjkPlayerCore::ijkmp_create(std::function<int (void *)> msg_loop)
 {
     int ret = 0;
@@ -60,8 +67,8 @@ int IjkPlayerCore::ijkmp_prepare_async()
 
     //启用消息队列
     msg_queue_start(&_ffplayer->_msg_queue);
-    // 创建循环线程,this 是 IjkPlayerCore*,thread函数第一个参数是成员函数指针，第二个是执行这个成员函数的对象指针，第三个是传入这个函数的参数
-    _msg_thread = new std::thread(&IjkPlayerCore::ijkmp_msg_loop,this,this);
+    // 创建循环线程,this 是 IjkPlayerCore*,thread函数第一个参数是成员函数指针(线程函数)，第二个是执行这个成员函数的对象指针(因为成员函数不能脱离对象存在)，第三个是传入这个函数的参数
+    _msg_thread = new std::thread(&IjkPlayerCore::ijkmp_msg_loop,this,this);// 消息循环函数给线程去执行
     // 调用ffplayer,准备播放
     int ret = _ffplayer->ffplayer_prepare_async_1(_data_source);
     if(ret < 0)
@@ -75,7 +82,7 @@ int IjkPlayerCore::ijkmp_prepare_async()
 // 触发播放,这个方法的设计来源于Android mediaplayer,IJKPlayer也刻意模仿了这个接口
 int IjkPlayerCore::ijkmp_start()
 {
-    ffplayer_notify_msg1(_ffplayer,FFP_REQ_START);
+    ffp_notify_msg1(_ffplayer,FFP_REQ_START);
     return 0;
 }
 
