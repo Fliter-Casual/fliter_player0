@@ -17,7 +17,7 @@ extern "C" {
 #include "libavcodec/avfft.h"
 #include "libswresample/swresample.h"
 }
-
+// 消息队列头文件
 #include "ffmsg.h"
 // 释放消息携带的资源
 void msg_free_res(AVMessage *msg)
