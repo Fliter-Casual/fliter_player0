@@ -21,13 +21,13 @@ signals:
     // 只需声明槽函数，Qt会自动生成槽函数的实现代码（只需声明，无需实现）
 
     // 信号只声明不实现，槽要声明加实现。emit触发，connect连接
-    
+
     void SigPlayOrPause();  
     void SigStop();
 
-//slots槽:  先不实现这些槽函数了，等后面需要的时候再实现
 private slots:
-    void on_playOrPauseBtn_clicked();
+    // 虽然没有人调用这两个槽函数，他是点击按钮就会执行这个槽，函数的名字和按钮的名字是要对应的
+    void on_playOrPauseBtn_clicked(); // on_按钮名称_clicked()
 
     void on_stop_clicked();
 

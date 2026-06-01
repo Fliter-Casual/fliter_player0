@@ -26,6 +26,10 @@ MainWindow::~MainWindow()
 // 初始化信号槽相关的: connect: 连接信号和槽
 int MainWindow::InitSignalsAndSlots()
 {
+    //当 ui->showCtrlBar 这个对象发出了 SigPlayOrPause 信号时，请自动调用 this（即 MainWindow）对象的 OnPlayOrPause 函数。
+    //就是emit 后，就会跳转到connect，然后执行其绑定的函数
+    //这是一种解耦的设计：发送信号的控件（CtrlBar）不需要知道是谁在接收信号，也不需要知道接收者会做什么；接收者（MainWindow）也不需要知道是谁发出的信号
+
     connect(ui->showCtrlBar, &CtrlBar::SigPlayOrPause,this,&MainWindow::OnPlayOrPause);
     connect(ui->showCtrlBar, &CtrlBar::SigStop,this,&MainWindow::OnStop);
     return 0;
@@ -104,7 +108,7 @@ void MainWindow::OnStop()
 {
     qDebug() << "OnStop call";
     if(_mp) {
-        _mp->ijkmp_shutdown();
+        _mp->ijkmp_stop();
         delete _mp;
         _mp = NULL;
     }
