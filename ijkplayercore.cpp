@@ -86,6 +86,12 @@ int IjkPlayerCore::ijkmp_start()
     return 0;
 }
 
+int IjkPlayerCore::ijkmp_stop()
+{
+    ffp_notify_msg1(_ffplayer,FFP_REQ_PAUSE);
+    return 0;
+}
+
 // 读取消息,本质上是 ijkplayer 的“消息分发中心”，负责从消息队列里取消息(输出参数)，并根据消息类型决定要不要直接消费掉，还是继续等下一条
 int IjkPlayerCore::ijkmp_get_msg(AVMessage *msg, int block)// block 1 没消息就阻塞,block 0 没消息直接返回
 {
