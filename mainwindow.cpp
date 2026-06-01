@@ -23,10 +23,11 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
-// 初始化信号槽相关的
+// 初始化信号槽相关的: connect: 连接信号和槽
 int MainWindow::InitSignalsAndSlots()
 {
     connect(ui->showCtrlBar, &CtrlBar::SigPlayOrPause,this,&MainWindow::OnPlayOrPause);
+    connect(ui->showCtrlBar, &CtrlBar::SigStop,this,&MainWindow::OnStop);
     return 0;
 }
 
@@ -95,5 +96,16 @@ void MainWindow::OnPlayOrPause()
         }
     } else {
         // 已经准备好了，则暂停或者恢复播放
+    }
+}
+
+// 停止的槽函数
+void MainWindow::OnStop()
+{
+    qDebug() << "OnStop call";
+    if(_mp) {
+        _mp->ijkmp_shutdown();
+        delete _mp;
+        _mp = NULL;
     }
 }

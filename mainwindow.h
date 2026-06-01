@@ -13,16 +13,20 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    // 1. 构造函数和析构函数
+    //  构造函数和析构函数
     explicit MainWindow(QWidget *parent = 0);
     ~MainWindow();
 
-    // 2. 初始化信号槽相关的
+    //  初始化信号槽相关的
     int InitSignalsAndSlots();
-    // 3. 消息循环函数
+    //  消息循环函数
     int message_loop(void *arg);
-    // 4. 播放或者暂停的槽函数
+
+    //  播放或者暂停的槽函数
     void OnPlayOrPause();
+
+    //  停止的槽函数
+    void OnStop();
 
 private:
     Ui::MainWindow *ui;
