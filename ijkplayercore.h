@@ -7,6 +7,9 @@
 #include <functional>
 #include "fffplay.h"  //真正意义上的播放器FFPlayer ffplayer在这里
 #include "ffmsg_queue.h"
+#include "Logger.hpp"
+
+using namespace LogModule;
 
 /*-
  MPST_CHECK_NOT_RET(mp->mp_state, MP_STATE_IDLE);
@@ -153,20 +156,84 @@ public:
     int ijkmp_msg_loop(void *arg);
 
 private:
-    // 互斥量
+    /* ==================== 优化改动：互斥锁的注释 ====================
+     * 原始代码: std::mutex _mutex;
+     * 优化: 添加注释说明用途
+     * 
+     * 作用:
+     *   1. 保护 _ffplayer 指针的访问
+     *   2. 保护播放状态 _mp_state 的修改
+     *   3. 防止多线程竞争
+     * ================================================================ */
+    // 互斥量 - 保护播放器资源的线程安全访问
     std::mutex _mutex;
-    // 真正的播放器
-    FFPlayer *_ffplayer = NULL;
+    
+    /* ==================== 优化改动：使用智能指针管理播放器 ====================
+     * 原始代码: FFPlayer *_ffplayer = NULL;
+     * 
+     * 问题:
+     *   1. 使用裸指针，需要手动 delete
+     *   2. 容易导致内存泄漏
+     *   3. 析构时可能忘记释放
+     * 
+     * 优化方案: 使用 std::unique_ptr<FFPlayer>
+     * 优势:
+     *   1. 自动管理内存生命周期
+     *   2. 异常安全
+     *   3. 析构时自动释放
+     * ================================================================ */
+    // 真正的播放器 - 原始: FFPlayer *_ffplayer = NULL;
+    std::unique_ptr<FFPlayer> _ffplayer;
+    
     //函数指针, 指向创建的message_loop，即消息循环函数
     //    int (*msg_loop)(void*);
     std::function<int(void *)> _msg_loop = NULL; // ui处理消息的循环,这个循环还没写
-    //消息机制线程
-    std::thread *_msg_thread; // 执行msg_loop
+    
+    /* ==================== 优化改动：消息处理线程的智能指针 ====================
+     * 原始代码: std::thread *_msg_thread;
+     * 
+     * 问题:
+     *   1. 使用裸指针，需要手动 delete
+     *   2. 线程没有被 join()，资源泄漏
+     *   3. 析构时没有正确清理
+     * 
+     * 优化方案: 使用 std::unique_ptr<std::thread>
+     * 优势:
+     *   1. 自动管理线程内存
+     *   2. 确保线程被正确释放
+     *   3. 异常安全
+     * ================================================================ */
+    //消息机制线程 - 原始: std::thread *_msg_thread;
+    std::unique_ptr<std::thread> _msg_thread;
+    
     //    SDL_Thread _msg_thread;
+    
+    /* ==================== 优化改动：添加数据源的注释 ====================
+     * 原始代码: char *_data_source;
+     * 优化: 说明内存管理方式
+     * 
+     * 说明:
+     *   1. 存储播放 URL 的字符串
+     *   2. 需要在析构时释放
+     * ================================================================ */
     //字符串，就是一个播放url
-    char *_data_source;
+    char *_data_source;  // TODO: 考虑改为 std::string 以避免手动内存管理
+    
+    /* ==================== 优化改动：播放状态变量的说明 ====================
+     * 原始代码: int _mp_state;
+     * 优化: 添加详细说明和注释
+     * 
+     * 取值:
+     *   MP_STATE_IDLE, MP_STATE_INITIALIZED, MP_STATE_ASYNC_PREPARING,
+     *   MP_STATE_PREPARED, MP_STATE_STARTED, MP_STATE_PAUSED,
+     *   MP_STATE_COMPLETED, MP_STATE_STOPPED, MP_STATE_ERROR, MP_STATE_END
+     * 
+     * 注意:
+     *   1. 状态转换需要互斥锁保护
+     *   2. 设置新状态时应该检查转换的合法性
+     * ================================================================ */
     //播放器状态，例如prepared,resumed,error,completed等
-    int _mp_state;  // 播放状态
+    int _mp_state;  // 播放状态 - 详见上面的 MP_STATE_* 宏定义
 };
 
 #endif // PLAYERCORE_H
