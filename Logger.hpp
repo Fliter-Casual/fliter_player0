@@ -12,15 +12,24 @@
 
 namespace LogModule
 {
-    // 1. 获取时间
+    // 1. 获取时间 (兼容 C++17 及多平台)
     std::string GetTimeStamp()
     {
-        time_t timestamp = time(nullptr); //纯秒时间
-        struct tm data_time;  //包含年月日的时间
-        localtime_r(&timestamp,&data_time); //转换时间戳
+        time_t timestamp = time(nullptr); 
+        struct tm data_time;  
+        
+        // 跨平台处理：Windows 用 localtime_s, Linux/Mac/Unix 用 localtime_r
+        #ifdef _WIN32
+            // Windows 下的线程安全版本
+            localtime_s(&data_time, &timestamp);
+        #else
+            // Linux/Unix 下的线程安全版本
+            localtime_r(&timestamp, &data_time);
+        #endif
 
         char data_time_str[128];
-        snprintf(data_time_str,sizeof(data_time_str),"%4d-%02d-%02d  %02d:%02d:%02d",
+        // 使用 snprintf 确保缓冲区安全
+        snprintf(data_time_str, sizeof(data_time_str), "%4d-%02d-%02d %02d:%02d:%02d",
                 data_time.tm_year + 1900,
                 data_time.tm_mon + 1,
                 data_time.tm_mday,
@@ -28,7 +37,7 @@ namespace LogModule
                 data_time.tm_min,
                 data_time.tm_sec);
 
-        return data_time_str;
+        return std::string(data_time_str);
     }
 
 
@@ -164,7 +173,7 @@ namespace LogModule
     public:
         Logger()
         {
-            
+        
         }
         ~Logger()
         {
