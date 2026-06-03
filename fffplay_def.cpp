@@ -278,10 +278,104 @@ Frame *frame_queue_peek_next(FrameQueue *f)
     return &f->queue[(f->rindex  + 1) % f->max_size];
 }
 
-/* 获取last Frame* ，即当前读索引位置的帧指针：
+/* 获取last Frame* ，即当前读索引位置的帧指针(peek:看、读、取，但是不操作)
+ 当前正在显示的帧(last:最新的)，也就是最近一次被消费的帧（队头帧）
  */
-Frame *frame_queue_peek_last(FrameQueue *f)
+Frame *frame_queue_peek_last(FrameQueue *f) 
 {
     return &f->queue[f->rindex];
 }
 
+// 获取可写指针
+Frame *frame_queue_peek_writable(FrameQueue *f)
+{
+    // 在有界队列已满时，安全地阻塞当前线程，直到队列有空闲空间，或者收到退出/中断信号
+    SDL_LockMutex(f->mutex);
+    while(f->size >= f->max_size && !f->pktq->abort_request) // 队列已满 && 未收到退出请求，就一直等待
+    {
+        SDL_CondWait(f->cond, f->mutex);
+    }
+    SDL_UnlockMutex(f->mutex);
+
+    if(f->pktq->abort_request) // 中断请求, 检查是不是要退出
+        return NULL;
+    return &f->queue[f->windex];
+}
+
+// 获取可读指针
+Frame *frame_queue_peek_readable(FrameQueue *f)
+{
+    SDL_LockMutex(f->mutex);
+    while(f->size - f->rindex <= 0 && !f->pktq->abort_request) // 队列已空 && 未收到退出请求，就一直等待
+    {
+        SDL_CondWait(f->cond, f->mutex);
+    }
+    SDL_UnlockMutex(f->mutex);
+
+    if(f->pktq->abort_request)
+        return NULL;
+
+    return &f->queue[(f->rindex) % f->max_size];
+}
+
+// 更新写指针
+// 通常在解码线程成功解码出一帧数据（AVFrame）并填充到队列的可写位置之后调用
+/**
+ * @brief 向帧队列中推入一个帧（推进写索引并通知消费者）
+ * 
+ * 该函数将写索引向前移动一位，并在队列大小增加后通过条件变量唤醒等待中的读取线程。
+ * 注意：此函数假设调用者已经准备好数据，仅负责更新队列状态和同步信号。
+ *
+ * @param f 指向 FrameQueue 结构体的指针，表示目标帧队列
+ */
+void frame_queue_push(FrameQueue *f)
+{
+    // 循环递增写索引，实现环形缓冲区逻辑
+    if (++f->windex == f->max_size)
+        f->windex = 0;
+
+    // 加锁以保护共享资源 size 和条件变量状态
+    SDL_LockMutex(f->mutex);
+    f->size++;
+
+    // 发送信号唤醒因队列为空而阻塞的读取线程
+    SDL_CondSignal(f->cond);
+
+    SDL_UnlockMutex(f->mutex);
+}
+
+/* 释放当前frame，并更新读索引rindex */
+//函数通常在当前帧（Frame）被解码器渲染或播放完毕之后调用。
+void frame_queue_next(FrameQueue *f)
+{
+
+    frame_queue_unref_item(&f->queue[f->rindex]);
+    if (++f->rindex == f->max_size)
+        f->rindex = 0;
+    SDL_LockMutex(f->mutex);
+    f->size--;
+    SDL_CondSignal(f->cond);
+    SDL_UnlockMutex(f->mutex);
+}
+
+/* 获取当前帧队列中剩余帧数 */
+int frame_queue_nb_remaining(FrameQueue *f)
+{
+    SDL_LockMutex(f->mutex);
+    int ret = f->size; // 这是个共享变量，它会被多个线程同时修改,所以要加锁保护
+    SDL_UnlockMutex(f->mutex);
+    return ret;
+}
+
+
+//功能尚未实现完整、逻辑存在争议,为了调试方便而暂时禁用
+// 获取当前帧队列中第一个帧的播放位置
+int64_t frame_queue_last_pos(FrameQueue *f)
+{
+    Frame *fp = &f->queue[f->rindex];
+//    if (f->rindex_shown && fp->serial == f->pktq->serial)
+//    if(fp)
+//        return fp->pos;
+//    else
+        return -1;
+}
