@@ -150,7 +150,7 @@ int FFPlayer::read_thread()
         }
     }
 
-    LOG(LogLevel::INFO) << "read_thread exit.";
+    LOG(LogLevel::INFO) << __FUNCTION__ << "read_thread exit.";
 
     return 0;
 }

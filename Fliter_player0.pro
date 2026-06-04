@@ -16,8 +16,10 @@ DEFINES += QT_DEPRECATED_WARNINGS
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
+    Logger.cpp \
     ctrlbar.cpp \
     fffplay.cpp \
+    fffplay_def.cpp \
     ffmsg_queue.cpp \
     ijkplayercore.cpp \
     main.cpp \
@@ -27,8 +29,11 @@ SOURCES += \
     titlebar.cpp
 
 HEADERS += \
+    Logger.hpp \
+    Mutex.hpp \
     ctrlbar.h \
     fffplay.h \
+    fffplay_def.h \
     ffmsg.h \
     ffmsg_queue.h \
     ijkplayercore.h \
@@ -58,6 +63,8 @@ LIBS += $$PWD/SDL2-2.0.10/lib/x86/SDL2.lib  \
         $$PWD/ffmpeg-4.2.1-win32-dev/lib/swscale.lib    \
         "C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x86\Ole32.Lib"
 }
+
+LIBS += -lstdc++fs
 
 
 

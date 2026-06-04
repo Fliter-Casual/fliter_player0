@@ -156,10 +156,10 @@ private:
     // 互斥量
     std::mutex _mutex;
     // 真正的播放器
-    FFPlayer *_ffplayer = NULL;
+    FFPlayer *_ffplayer = nullptr;
     //函数指针, 指向创建的message_loop，即消息循环函数
     //    int (*msg_loop)(void*);
-    std::function<int(void *)> _msg_loop = NULL; // ui处理消息的循环,这个循环还没写
+    std::function<int(void *)> _msg_loop = nullptr; // ui处理消息的循环,这个循环还没写
     //消息机制线程
     std::thread *_msg_thread; // 执行msg_loop
     //    SDL_Thread _msg_thread;

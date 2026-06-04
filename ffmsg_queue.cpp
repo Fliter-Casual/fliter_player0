@@ -19,13 +19,14 @@ extern "C" {
 }
 // 消息队列头文件
 #include "ffmsg.h"
+
 // 释放消息携带的资源
 void msg_free_res(AVMessage *msg)
 {
     if(!msg || !msg->obj)
         return;
     msg->free_l(msg->obj);//这种消息类中的资源的释放函数是自己定义的
-    msg->obj = NULL;
+    msg->obj = nullptr;
 }
 
 // 消息队列内部重新去构建 AVMessage (重新申请AVMessage,或资源回收利用recycle_msg )
@@ -53,7 +54,7 @@ int msg_queue_put_private(MessageQueue *q, AVMessage *msg)
 
      // 拷贝消息内容（浅拷贝）
      *msgl = *msg;
-     msgl->next = NULL;
+     msgl->next = nullptr;
 
      if(!q->first_msg)//第一次插入
      {
@@ -93,12 +94,12 @@ int msg_queue_get(MessageQueue *q, AVMessage *msg, int block)
         {
             q->first_msg = msgl->next; //出了一个头，头结点变成了原来节点的下一个节点
             if(!q->first_msg)
-                q->last_msg = NULL;
+                q->last_msg = nullptr;
             q->nb_messages--;// 出去了一个消息
             *msg = *msgl;//把消息内容拷贝出去(浅拷贝)
 
             //回收消息结构体（重点）,obj 不 free（由调用者负责）
-            msgl->obj = NULL;
+            msgl->obj = nullptr;
             // 插入回收池的队头(头插)
             msgl->next = q->recycle_msg;
             q->recycle_msg = msgl;
@@ -204,19 +205,19 @@ void msg_queue_flush(MessageQueue *q)
    AVMessage *msg;
    AVMessage *next;
    SDL_LockMutex(q->mutex);
-   for (msg = q->first_msg; msg != NULL; msg = next)
+   for (msg = q->first_msg; msg != nullptr; msg = next)
    { // 这个时候的obj没有清空？那会导致内存泄漏，即使是把消息对象暂存到了recycle_msg,复用这个节点的时候会覆盖旧的obj,旧的obj丢失泄露
        next = msg->next;// 下把msg的下一个节点保存下来
 
        msg_free_res(msg);
-       msg->obj = NULL;
+       msg->obj = nullptr;
 
        // 再把它插入回收队列(头插)
        msg->next = q->recycle_msg;
        q->recycle_msg = msg;
    }
-   q->last_msg = NULL;
-   q->first_msg = NULL;
+   q->last_msg = nullptr;
+   q->first_msg = nullptr;
    q->nb_messages = 0;
    SDL_UnlockMutex(q->mutex);
 }
@@ -300,7 +301,7 @@ void msg_queue_remove(MessageQueue *q, int what)
         }
         else
         {
-            q->last_msg = NULL;
+            q->last_msg = nullptr;
         }
     }
 

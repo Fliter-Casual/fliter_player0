@@ -3,15 +3,19 @@
 #include <iostream>
 #include <string.h>
 #include "ffmsg.h"
+#include "Logger.hpp"
+
+using namespace LogModule;
 
 IjkPlayerCore::IjkPlayerCore ()
 {
-    std::cout << " IjkPlayerCore()" << std::endl;
+    ENABLE_CONSOLE_LOG_STRATEGY();
+    LOG(LogLevel::INFO) << " IjkPlayerCore()" ;
 }
 
 IjkPlayerCore::~IjkPlayerCore()
 {
-    std::cout << " ~IjkPlayerCore()" << std::endl;
+    LOG(LogLevel::INFO) << " ~IjkPlayerCore()" ;
 }
 
 // 创建播放器,参数是一个函数指针，指向创建的message_loop，即消息循环函数
@@ -21,10 +25,10 @@ int IjkPlayerCore::ijkmp_create(std::function<int (void *)> msg_loop)
     _ffplayer = new FFPlayer();
     if(!_ffplayer)
     {
-        std::cout << " new FFPlayer() failed" << std::endl;
+        LOG(LogLevel::ERROR) << " new FFPlayer() failed" ;
         return -1;
     }
-    _msg_loop = msg_loop;
+    _msg_loop = msg_loop; // 消息循环函数
     ret = _ffplayer->ffplayer_create();
 
     if(ret < 0)
@@ -36,6 +40,7 @@ int IjkPlayerCore::ijkmp_create(std::function<int (void *)> msg_loop)
 
 int IjkPlayerCore::ijkmp_destroy()
 {
+    _ffplayer->ffplayer_destroy();
     return 0;
 }
 
@@ -50,7 +55,7 @@ int IjkPlayerCore::ijkmp_set_data_source(const char *url)
     if (_data_source)
     {
         free(_data_source);
-        _data_source = NULL;
+        _data_source = nullptr;
     }
 
     // 2. 再复制新的
@@ -88,8 +93,12 @@ int IjkPlayerCore::ijkmp_start()
 
 int IjkPlayerCore::ijkmp_stop()
 {
-    ffp_notify_msg1(_ffplayer,FFP_REQ_PAUSE);
-    return 0;
+    int ret = _ffplayer->ffplayer_stop_1();
+    if(ret < 0)
+    {
+        _mp_state = MP_STATE_ERROR;
+        return ret;
+    }
 }
 
 // 读取消息,本质上是 ijkplayer 的“消息分发中心”，负责从消息队列里取消息(输出参数)，并根据消息类型决定要不要直接消费掉，还是继续等下一条
@@ -108,19 +117,19 @@ int IjkPlayerCore::ijkmp_get_msg(AVMessage *msg, int block)// block 1 没消息�
         //播放器已准备完成
         case FFP_MSG_PREPARED:
             //__FUNCTION__ 编译器预定义的宏，代表当前函数的函数名
-            std::cout << __FUNCTION__ << " FFP_MSG_PREPARED" <<std::endl;
+            LOG(LogLevel::INFO) << __FUNCTION__ << " FFP_MSG_PREPARED" ;
             break;
 
         //这是一个 “请求消息”,上层想让播放器 start，但播放器内部还没真正 start
         //REQ消息不应该交给上层，配合while(1) continue在播放器内部消化掉，等真正状态变化（如 PREPARED / STARTED）再通知上层
         case FFP_REQ_START:
-            std::cout << __FUNCTION__ << " FFP_REQ_START" << std::endl;
+            LOG(LogLevel::INFO) << __FUNCTION__ << " FFP_REQ_START" ;
             continue_wait_next_msg = 1;
             // ffplayer_->start();
             break;
         // 其他情况，不做特殊处理直接返回
         default:
-            std::cout << __FUNCTION__ << " default " << msg->what << std::endl;
+            LOG(LogLevel::INFO) << __FUNCTION__ << " default " << msg->what ;
             break;
         }
         if (continue_wait_next_msg)
