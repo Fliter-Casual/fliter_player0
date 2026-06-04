@@ -72,19 +72,21 @@ int FFPlayer::ffplayer_stop_1()
 // 打开流
 int FFPlayer::stream_open(const char *file_name)
 {
-    // 初始化SDL
+    // 初始化SDL,以允许音频输出
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER))
     {
         LOG(LogLevel::ERROR) << "Could not initialize SDL - " << SDL_GetError();
         av_log(NULL, AV_LOG_FATAL, "Did you set the DISPLAY variable?\n");
         return -1;
     }
-    // 初始化Frame帧队列
+    // 初始化视频帧队列
     if (frame_queue_init(&pictq , &videoq, VIDEO_PICTURE_QUEUE_SIZE) < 0)
         goto fail;
+    //  初始化音频帧队列
     if (frame_queue_init(&sampq, &audioq, SAMPLE_QUEUE_SIZE) < 0)
         goto fail;
 
+    // 初始化packet队列
     if (packet_queue_init(&videoq) < 0 ||
             packet_queue_init(&audioq) < 0 )
         goto fail;
@@ -109,13 +111,19 @@ fail:
 
 void FFPlayer::stream_close()
 {
-    abort_request = 1; // 请求退出
+    abort_request = 1; // 请求退出（请求关闭read_thread线程）
     if(_read_thread && _read_thread->joinable()) // 判断线程是否可执行(joinable)
     {
         _read_thread->join(); // 等待线程结束
     }
 
     // 关闭解复用器 avformat_close_input(&is->ic);
+
+    // 关闭stream, 比如调用stream_component_close(i),该函数实现的时候涉及到：
+        // 关闭解码线程
+        // 释放解码器资源
+        // 关闭对应的音频，视频设备
+
     // 释放packet队列
     packet_queue_destroy(&videoq);
     packet_queue_destroy(&audioq);
@@ -123,6 +131,7 @@ void FFPlayer::stream_close()
     frame_queue_destory(&pictq);
     frame_queue_destory(&sampq);
 
+    // 释放其他资源
     if(_input_filename)
     {
         free(_input_filename);
