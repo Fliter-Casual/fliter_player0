@@ -80,8 +80,11 @@ void MainWindow::OnPlayOrPause()
     // 1. 先检测mp是否已经创建
     if(!_mp) {
         _mp = new IjkPlayerCore();
+
         // 创建播放器，创建的时候要传入消息循环函数，这样播放器就知道消息循环函数在哪里了，播放器在需要发送消息的时候就可以调用这个函数把消息发到UI线程的消息队列里
-        ret = _mp->ijkmp_create(std::bind(&MainWindow::message_loop, this, std::placeholders::_1));
+        // ret = mp_->ijkmp_create(std::bind(&MainWind::message_loop, this, std::placeholders::_1));不清晰，此处用lambda
+        ret = _mp->ijkmp_create([this](void *arg) {
+            return this->message_loop(arg);});
         if(ret <0) {
             qDebug() << "IjkMediaPlayer create failed";
             delete _mp;
@@ -109,6 +112,7 @@ void MainWindow::OnStop()
     qDebug() << "OnStop call";
     if(_mp) {
         _mp->ijkmp_stop();
+        _mp->ijkmp_destroy();
         delete _mp;
         _mp = NULL;
     }

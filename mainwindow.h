@@ -4,10 +4,12 @@
 #include <QMainWindow>
 #include "ijkplayercore.h"
 
-namespace Ui { class MainWindow; }
+namespace Ui { 
+class MainWindow; 
+}
 
 
-// 1. 主窗口类，负责UI界面和播放器的交互
+// 主窗口类，负责UI界面和播放器的交互
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
