@@ -35,7 +35,7 @@ fliter_player0/
 │
 ├── 工具类
 │   ├── ffmsg.h / ffmsg_queue.h / ffmsg_queue.cpp  # 消息队列系统
-│   ├── Logger.hpp                                  # 日志工具
+│   ├── Logger.hpp / logger.cpp                     # 日志工具
 │   ├── Mutex.hpp                                   # 线程同步
 │   └── icon.qrc                                    # 资源配置
 │
