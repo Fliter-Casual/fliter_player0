@@ -200,7 +200,7 @@ int FFPlayer::stream_component_open(int stream_index)
         // 音频解码器
         // 从解码器实例(上下文)中获取音频参数
         audio_stream_index = stream_index;      // 保存音频流索引
-        audio_st = ic->streams[stream_index];   // 保存音频流
+        audio_stream = ic->streams[stream_index];   // 保存音频流
         sample_rate = avctx->sample_rate;       // 采样率
         nb_channels = avctx->channels;          // 通道数
         channel_layout = avctx->channel_layout; // 通道布局
@@ -215,7 +215,7 @@ int FFPlayer::stream_component_open(int stream_index)
         // 视频解码器
         // 从解码器实例(上下文)中获取视频参数
         video_stream_index = stream_index;    // 获取视频流索引
-        video_st = ic->streams[stream_index]; // 获取视频流
+        video_stream = ic->streams[stream_index]; // 获取视频流
         // 初始化ffplay封装的视频解码器
         // decoder_init(&is->viddec, avctx, &is->videoq, is->continue_read_thread);
         // 启动视频频解码线程
@@ -261,7 +261,7 @@ void FFPlayer::stream_component_close(int stream_index)
     switch (codecpar->codec_type)
     {
     case AVMEDIA_TYPE_AUDIO:
-        LOG(Level::DEBUG) << "stream_component_close() audio.";
+        LOG(LogLevel::DEBUG) << "stream_component_close() audio.";
 
         // 停止音频解码线程
         // decoder_abort(&is->auddec, &is->sampq);
@@ -284,7 +284,7 @@ void FFPlayer::stream_component_close(int stream_index)
         //      is->audio_buf = NULL;                   // 释放audio buf
         break;
     case AVMEDIA_TYPE_VIDEO:
-        LOG(Level::DEBUG) << "stream_component_close() video.";
+        LOG(LogLevel::DEBUG) << "stream_component_close() video.";
         // 停止视频解码线程
         // decoder_abort(&is->viddec, &is->pictq);
         // 释放视频解码器
@@ -309,11 +309,11 @@ void FFPlayer::stream_component_close(int stream_index)
     switch (codecpar->codec_type)
     {
     case AVMEDIA_TYPE_AUDIO:
-        audio_st = NULL;
+        audio_stream = NULL;
         audio_stream_index = -1;
         break;
     case AVMEDIA_TYPE_VIDEO:
-        video_st = NULL;
+        video_stream = NULL;
         video_stream_index = -1;
         break;
     default:
@@ -395,9 +395,9 @@ int FFPlayer::read_thread()
     ffp_notify_msg1(this, FFP_MSG_COMPONENT_OPEN);// 通知UI线程，已经打开媒体流
     LOG(LogLevel::INFO) << "read_thread: FFP_MSG_COMPONENT_OPEN " << this;
 
-    if (video_stream < 0 && audio_stream < 0) {
+    if (video_stream_index < 0 && audio_stream_index < 0) {
         av_log(NULL, AV_LOG_FATAL, "Failed to open file '%s' or configure filtergraph\n",
-               input_filename_);
+               _input_filename);
         ret = -1;
         goto fail;
     }

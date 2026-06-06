@@ -23,7 +23,7 @@ public:
     // 打开指定stream对应的解码器、创建解码线程、以及初始化对应的输出
     int stream_component_open(int stream_index);
     // 关闭指定stream对应的解码器、销毁解码线程、销毁输出，释放解码器资源
-    int stream_component_close(int stream_index);
+    void stream_component_close(int stream_index);
 
     MessageQueue _msg_queue; // 消息队列
     char *_input_filename; // 输入文件名
@@ -44,8 +44,8 @@ public:
 
     int abort_request = 0;
 
-    AVStream *audio_st = NULL;   // 音频流
-    AVStream *video_st = NULL;   // 视频流
+    AVStream *audio_stream = NULL;   // 音频流
+    AVStream *video_stream = NULL;   // 视频流
     int audio_stream_index = -1;
     int video_stream_index = -1;
 
