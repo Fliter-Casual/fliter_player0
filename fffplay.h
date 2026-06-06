@@ -43,8 +43,15 @@ public:
     PacketQueue videoq;         // 视频packet队列
 
     int abort_request = 0;
+
+    AVStream *audio_st = NULL;   // 音频流
+    AVStream *video_st = NULL;   // 视频流
     int audio_stream_index = -1;
     int video_stream_index = -1;
+
+    int eof = 0;
+    
+    AVFormatContext *ic = NULL;
 };
 
 // 以下封装函数设置内联 inline :编译器会把这个函数直接展开到调用的地方，避免了函数调用的开销，提高了性能
