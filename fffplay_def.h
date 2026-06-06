@@ -41,8 +41,8 @@ enum RET_CODE
     RET_ERR_OUTOFMEMORY,					// 没有内存
     RET_ERR_STACKOVERFLOW,					// 溢出
     RET_ERR_NULLREFERENCE,					// 空参考
-    RET_ERR_ARGUMENTOUTOFRANGE,				//
-    RET_ERR_PARAMISMATCH,					//
+    RET_ERR_ARGUMENTOUTOFRANGE,				// 参数超出范围
+    RET_ERR_PARAMISMATCH,					// 参数不匹配
     RET_ERR_MISMATCH_CODE,                  // 没有匹配的编解码器
     RET_ERR_EAGAIN,
     RET_ERR_EOF 
@@ -190,4 +190,4 @@ int64_t frame_queue_last_pos(FrameQueue *f);
 
 
 
-#endif 
+#endif //FFFPLAY_DEF_H

@@ -19,7 +19,7 @@ public:
     explicit MainWindow(QWidget *parent = 0);
     ~MainWindow();
 
-    //  初始化信号槽相关的
+    //  初始化信号槽相关的,connect连接信号和槽
     int InitSignalsAndSlots();
     //  消息循环函数
     int message_loop(void *arg);

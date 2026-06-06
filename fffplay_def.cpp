@@ -264,6 +264,7 @@ Frame *frame_queue_peek(FrameQueue *f)
 
 /* 获取当前Frame的下一Frame, 此时要确保queue里面至少有2个Frame */
 // 不管你什么时候调用，返回来肯定不是 NULL
+
 /**
  * @brief 获取帧队列中下一个待读取的帧指针（预读下一个位置，不移动读索引）
  *
@@ -289,6 +290,7 @@ Frame *frame_queue_peek_last(FrameQueue *f)
 // 获取可写指针
 Frame *frame_queue_peek_writable(FrameQueue *f)
 {
+    /* wait until we have space to put a new frame */
     // 在有界队列已满时，安全地阻塞当前线程，直到队列有空闲空间，或者收到退出/中断信号
     SDL_LockMutex(f->mutex);
     while(f->size >= f->max_size && !f->pktq->abort_request) // 队列已满 && 未收到退出请求，就一直等待
@@ -305,6 +307,7 @@ Frame *frame_queue_peek_writable(FrameQueue *f)
 // 获取可读指针
 Frame *frame_queue_peek_readable(FrameQueue *f)
 {
+    /* wait until we have a readable a new frame */
     SDL_LockMutex(f->mutex);
     while(f->size - f->rindex <= 0 && !f->pktq->abort_request) // 队列已空 && 未收到退出请求，就一直等待
     {
@@ -339,7 +342,7 @@ void frame_queue_push(FrameQueue *f)
     f->size++;
 
     // 发送信号唤醒因队列为空而阻塞的读取线程
-    SDL_CondSignal(f->cond);
+    SDL_CondSignal(f->cond); // 当_readable在等待时则可以唤醒
 
     SDL_UnlockMutex(f->mutex);
 }
@@ -358,6 +361,7 @@ void frame_queue_next(FrameQueue *f)
     SDL_UnlockMutex(f->mutex);
 }
 
+/* return the number of undisplayed frames in the queue */
 /* 获取当前帧队列中剩余帧数 */
 int frame_queue_nb_remaining(FrameQueue *f)
 {

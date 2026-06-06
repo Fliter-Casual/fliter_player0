@@ -99,6 +99,7 @@ int IjkPlayerCore::ijkmp_stop()
         _mp_state = MP_STATE_ERROR;
         return ret;
     }
+    return 0;
 }
 
 // 读取消息,本质上是 ijkplayer 的“消息分发中心”，负责从消息队列里取消息(输出参数)，并根据消息类型决定要不要直接消费掉，还是继续等下一条

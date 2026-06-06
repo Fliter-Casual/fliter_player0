@@ -12,6 +12,7 @@ class CtrlBar : public QWidget
     Q_OBJECT
 
 public:
+    // 必须显示调用构造函数
     explicit CtrlBar(QWidget *parent = 0);
     ~CtrlBar();
 
