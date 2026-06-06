@@ -3,6 +3,8 @@
 #include <string.h>
 #include "ffmsg.h"
 #include "Logger.hpp"
+// #include <experimental/filesystem>
+// namespace fs = std::experimental::filesystem;
 
 using namespace LogModule;
 
@@ -63,7 +65,6 @@ int FFPlayer::ffplayer_start_1()
 {
     // 触发播放
     LOG(LogLevel::INFO) << "ffplayer_start_1() called.";
-    return 0;
 }
 
 int FFPlayer::ffplayer_stop_1()
@@ -72,7 +73,6 @@ int FFPlayer::ffplayer_stop_1()
     abort_request = 1;            // 设置停止播放
     msg_queue_abort(&_msg_queue); // 停止消息队列,禁止再插入消息
     LOG(LogLevel::INFO) << "ffplayer_stop_1() called.";
-    return 0;
 }
 
 // 打开流
@@ -345,11 +345,17 @@ int FFPlayer::read_thread()
         goto fail;
     }
 
+    // std::string current_dir = fs::current_path().string();
+    // LOG(LogLevel::INFO) << "Current Working Directory: " << current_dir;
+
     // 打开文件,主要是探测协议类型，如果是网络文件则创建网络连接等
     err = avformat_open_input(&ic, _input_filename, NULL, NULL);
     if (err < 0)
     {
-        LOG(LogLevel::ERROR) << "Could not open source file " << _input_filename;
+        char errbuf[128];
+        av_strerror(err, errbuf, sizeof(errbuf));
+        LOG(LogLevel::ERROR) << "Could not open source file " << _input_filename<< ", Error code: " << err 
+                             << ", Details: " << errbuf;
         ret = -1;
         goto fail;
     }

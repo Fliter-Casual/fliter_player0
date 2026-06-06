@@ -161,10 +161,10 @@ private:
     //    int (*msg_loop)(void*);
     std::function<int(void *)> _msg_loop = nullptr; // ui处理消息的循环,这个循环还没写
     //消息机制线程
-    std::thread *_msg_thread; // 执行msg_loop
+    std::thread *_msg_thread = nullptr; // 执行msg_loop
     //    SDL_Thread _msg_thread;
     //字符串，就是一个播放url
-    char *_data_source;
+    char *_data_source = nullptr;
     //播放器状态，例如prepared,resumed,error,completed等
     int _mp_state;  // 播放状态
 };

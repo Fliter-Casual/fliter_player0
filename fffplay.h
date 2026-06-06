@@ -26,13 +26,13 @@ public:
     void stream_component_close(int stream_index);
 
     MessageQueue _msg_queue; // 消息队列
-    char *_input_filename; // 输入文件名
+    char *_input_filename = nullptr; // 输入文件名
 
     // 线程的执行函数(线程入口函数)
     int read_thread();// 读取线程, 这个线程的主要功能是读取输入流，解封装，解码等，最后把解码后的数据发送给UI线程进行渲染
 
     // 负责读取和解码的后台线程对象
-    std::thread *_read_thread;
+    std::thread *_read_thread = nullptr;
 
     // 帧队列
     FrameQueue pictq;       // 视频Frame队列
