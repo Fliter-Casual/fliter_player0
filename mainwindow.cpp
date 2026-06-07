@@ -88,7 +88,7 @@ void MainWindow::OnPlayOrPause()
         if(ret <0) {
             qDebug() << "IjkMediaPlayer create failed";
             delete _mp;
-            _mp = NULL;
+            _mp = nullptr;
             return;
         }
         // 设置url
@@ -98,7 +98,7 @@ void MainWindow::OnPlayOrPause()
         if(ret <0) {
             qDebug() << "IjkMediaPlayer create failed";
             delete _mp;
-            _mp = NULL;
+            _mp = nullptr;
             return;
         }
     } else {
@@ -114,6 +114,6 @@ void MainWindow::OnStop()
         _mp->ijkmp_stop();
         _mp->ijkmp_destroy();
         delete _mp;
-        _mp = NULL;
+        _mp = nullptr;
     }
 }

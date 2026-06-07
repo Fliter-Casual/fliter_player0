@@ -171,7 +171,7 @@ void frame_queue_signal(FrameQueue *f);
 Frame *frame_queue_peek(FrameQueue *f);
 
 /* 获取当前Frame的下一Frame, 此时要确保queue里面至少有2个Frame */
-// 不管你什么时候调用，返回来肯定不是 NULL
+// 不管你什么时候调用，返回来肯定不是 nullptr
 Frame *frame_queue_peek_next(FrameQueue *f);
 //获取last Frame：
 Frame *frame_queue_peek_last(FrameQueue *f);

@@ -32,7 +32,7 @@ public:
 
 private:
     Ui::MainWindow *ui;
-    IjkPlayerCore *_mp = NULL; // IjkMediaPlayer--mp
+    IjkPlayerCore *_mp = nullptr; // IjkMediaPlayer--mp
 };
 
 #endif // MAINWINDOW_H

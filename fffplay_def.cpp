@@ -17,7 +17,7 @@ static int packet_queue_put_private(PacketQueue *q, AVPacket *pkt)
     
     // 此处没有做引用计数，那这里也说明av_read_frame不会替用户释放pkt
     pkt1->pkt = *pkt; // 拷贝AVPacket(浅拷贝，AVPakcet.data等内存并没有拷贝)
-    pkt1->next = NULL;
+    pkt1->next = nullptr;
     if (pkt == &flush_pkt) // 如果放入的是flush_pkt，需要增加队列的播放序列号，以区分不连续的两段数据
     {
         q->serial++;
@@ -68,7 +68,7 @@ int packet_queue_put_nullpacket(PacketQueue *q, int stream_index)
 {
     AVPacket pkt1, *pkt = &pkt1;
     av_init_packet(pkt);//主要做的是初始化内部引用计数和默认值。为了创建一个明确的“空包”（Null Packet），必须手动将关键数据字段置空
-    pkt->data = NULL;
+    pkt->data = nullptr;
     pkt->size = 0;
     pkt->stream_index = stream_index; //必须指定特定流的索引,所以没用全局的flush_pkt
     return packet_queue_put(q, pkt);  //这里是局部创建了一个新的空包，不用手动释放
@@ -80,12 +80,12 @@ int packet_queue_init(PacketQueue *q)
     memset(q, 0, sizeof(PacketQueue));
     q->mutex = SDL_CreateMutex();
     if (!q->mutex) {
-        av_log(NULL, AV_LOG_FATAL, "SDL_CreateMutex(): %s\n", SDL_GetError());
+        av_log(nullptr, AV_LOG_FATAL, "SDL_CreateMutex(): %s\n", SDL_GetError());
         return AVERROR(ENOMEM);
     }
     q->cond = SDL_CreateCond();
     if (!q->cond) {
-        av_log(NULL, AV_LOG_FATAL, "SDL_CreateCond(): %s\n", SDL_GetError());
+        av_log(nullptr, AV_LOG_FATAL, "SDL_CreateCond(): %s\n", SDL_GetError());
         return AVERROR(ENOMEM);
     }
     q->abort_request = 1;
@@ -103,8 +103,8 @@ void packet_queue_flush(PacketQueue *q)
         av_packet_unref(&pkt->pkt); //释放AVPacket的资源
         av_freep(&pkt); //释放内存
     }
-    q->last_pkt = NULL;
-    q->first_pkt = NULL;
+    q->last_pkt = nullptr;
+    q->first_pkt = nullptr;
     q->nb_packets = 0;
     q->size = 0;
     q->duration = 0;
@@ -128,7 +128,7 @@ void packet_queue_abort(PacketQueue *q)
     SDL_UnlockMutex(q->mutex);
 }
 
-// 启动队列
+// 启动包队列
 void packet_queue_start(PacketQueue *q)
 {
     SDL_LockMutex(q->mutex);
@@ -157,7 +157,7 @@ int packet_queue_get(PacketQueue *q, AVPacket *pkt, int block, int *serial) // �
         {
             q->first_pkt = pkt1->next; // 删除队列头节点
             if (!q->first_pkt)
-                q->last_pkt = NULL;
+                q->last_pkt = nullptr;
             q->nb_packets--; // 节点数减1
             q->size -= pkt1->pkt.size + sizeof(*pkt1); // 缓存大小减去节点大小
             q->duration -= pkt1->pkt.duration; // 缓存总时长减去节点时长
@@ -209,13 +209,13 @@ int frame_queue_init(FrameQueue *f, PacketQueue *pktq, int max_size)
 
     // 创建互斥锁用于线程同步
     if (!(f->mutex = SDL_CreateMutex())) {
-        av_log(NULL, AV_LOG_FATAL, "SDL_CreateMutex(): %s\n", SDL_GetError());
+        av_log(nullptr, AV_LOG_FATAL, "SDL_CreateMutex(): %s\n", SDL_GetError());
         return AVERROR(ENOMEM);
     }
 
     // 创建条件变量用于线程间通信
     if (!(f->cond = SDL_CreateCond())) {
-        av_log(NULL, AV_LOG_FATAL, "SDL_CreateCond(): %s\n", SDL_GetError());
+        av_log(nullptr, AV_LOG_FATAL, "SDL_CreateCond(): %s\n", SDL_GetError());
         return AVERROR(ENOMEM);
     }
 
@@ -263,7 +263,7 @@ Frame *frame_queue_peek(FrameQueue *f)
 }
 
 /* 获取当前Frame的下一Frame, 此时要确保queue里面至少有2个Frame */
-// 不管你什么时候调用，返回来肯定不是 NULL
+// 不管你什么时候调用，返回来肯定不是 nullptr
 
 /**
  * @brief 获取帧队列中下一个待读取的帧指针（预读下一个位置，不移动读索引）
@@ -300,7 +300,7 @@ Frame *frame_queue_peek_writable(FrameQueue *f)
     SDL_UnlockMutex(f->mutex);
 
     if(f->pktq->abort_request) // 中断请求, 检查是不是要退出
-        return NULL;
+        return nullptr;
     return &f->queue[f->windex];
 }
 
@@ -316,7 +316,7 @@ Frame *frame_queue_peek_readable(FrameQueue *f)
     SDL_UnlockMutex(f->mutex);
 
     if(f->pktq->abort_request)
-        return NULL;
+        return nullptr;
 
     return &f->queue[(f->rindex) % f->max_size];
 }
