@@ -117,6 +117,16 @@ typedef struct PacketQueue
 #define FRAME_QUEUE_SIZE                    FFMAX(SAMPLE_QUEUE_SIZE, FFMAX(VIDEO_PICTURE_QUEUE_SIZE, SUBPICTURE_QUEUE_SIZE))
 
 
+typedef struct AudioParams // 音频参数结构体
+{
+    int freq;    // 音频采样频率
+    int channels;// 音频通道数
+    uint64_t channel_layout; // 音频通道布局
+    enum AVSampleFormat format; // 音频采样格式,如AV_SAMPLE_FMT_S16
+    int frame_size; // 音频帧大小,即一个音频帧中每个声道的采样数，一个采样为多少个字节，由音频采样格式的位深决定，通常有S16,即16-bit,即2个字节
+    int bytes_per_sec; // 采样频率的每秒采样数,采样率 × 声道数 × 每采样字节数,单位:字节/秒 
+}AudioParams;
+
 /* Common struct for handling all types of decoded data and allocated render buffers. */
 //用于处理所有类型的解码数据以及已分配的渲染缓冲区的通用结构体
 //用于缓存解码后的数据帧(和字幕)
