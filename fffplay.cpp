@@ -388,7 +388,7 @@ static int audio_decode_frame(FFPlayer *is)
         dec_channel_layout     != is->audio_src.channel_layout ||
         af->frame->sample_rate != is->audio_src.freq )
     {
-        sws_free(&ffp->swr_ctx);
+        swr_free(&is->swr_ctx);
         is->swr_ctx = swr_alloc_set_opts(nullptr,                        // 已有 ctx（这里新建）
                                          is->audio_tgt.channel_layout,   // 目标声道布局（stereo / 5.1）
                                          is->audio_tgt.format,           // 目标采样格式（S16）
@@ -402,7 +402,7 @@ static int audio_decode_frame(FFPlayer *is)
             av_log(NULL, AV_LOG_ERROR,
                    "Cannot create sample rate converter for conversion of %d Hz %s %d channels to %d Hz %s %d channels!\n",
                    af->frame->sample_rate, av_get_sample_fmt_name((enum AVSampleFormat)af->frame->format), af->frame->channels,
-                   is->audio_tgt.freq, av_get_sample_fmt_name(is->audio_tgt.fmt), is->audio_tgt.channels);
+                   is->audio_tgt.freq, av_get_sample_fmt_name(is->audio_tgt.format), is->audio_tgt.channels);
             swr_free(&is->swr_ctx);
             ret = -1;
             goto fail;
@@ -411,7 +411,7 @@ static int audio_decode_frame(FFPlayer *is)
         is->audio_src.channel_layout = dec_channel_layout;
         is->audio_src.channels       = af->frame->channels;
         is->audio_src.freq = af->frame->sample_rate;
-        is->audio_src.fmt = (enum AVSampleFormat)af->frame->format;
+        is->audio_src.format = (enum AVSampleFormat)af->frame->format;
     }
 
     // 执行真正的“重采样”数据转换（执行阶段）
@@ -430,7 +430,7 @@ static int audio_decode_frame(FFPlayer *is)
         // +256 的目的是重采样内部是有一定的缓存，就存在上一次的重采样还缓存数据和这一次重采样一起输出的情况，所以目的是多分配输出buffer
         int out_count = (int64_t)wanted_nb_samples * is->audio_tgt.freq / af->frame->sample_rate + 256; 
         // 计算对应的样本数 对应的采样格式 以及通道数，共需要多少buffer空间
-        int out_size = av_samples_get_buffer_size(nullptr, is->audio_tgt.channels, out_count, is->audio_tgt.fmt, 0);
+        int out_size = av_samples_get_buffer_size(nullptr, is->audio_tgt.channels, out_count, is->audio_tgt.format, 0);
         int len2;   // 重采样后的音频数据中单个声道的样本数
         if(out_size <= 0)
         {
@@ -459,7 +459,7 @@ static int audio_decode_frame(FFPlayer *is)
         if(len2 == out_count) // 重采样后得到的音频数据中单个声道的样本数等于重采样后得到的音频数据中单个声道的样本数
         {
             // 这里的意思是我已经多分配了buffer，实际输出的样本数不应该超过我多分配的数量
-            av_log(NULL, AV_LOG_DEBUG, AV_LOG_WARNING, "audio buffer is probably too small\n");
+            av_log(NULL,AV_LOG_WARNING, "audio buffer is probably too small\n");
             if (swr_init(is->swr_ctx) < 0)
                 swr_free(&is->swr_ctx); // 重新初始化并清空重采样器的内部缓存状态,避免因为内部缓存堆积而导致后续输出不可控
         }
@@ -467,7 +467,7 @@ static int audio_decode_frame(FFPlayer *is)
         // 重采样返回的一帧音频数据大小(以字节为单位)
         // 更新输出缓冲区指针并计算最终转换后的音频数据大小。
         is->audio_buf = is->audio_buf1; 
-        resampled_data_size = len2 * is->audio_tgt.channels * av_get_bytes_per_sample(is->audio_tgt.fmt);
+        resampled_data_size = len2 * is->audio_tgt.channels * av_get_bytes_per_sample(is->audio_tgt.format);
     }
     else
     {
@@ -478,31 +478,44 @@ static int audio_decode_frame(FFPlayer *is)
     
     frame_queue_next(&is->pictq);  // 移除队列中的第一个元素,真正释放frame
 
-    ret = resamped_data_size;
+    ret = resampled_data_size;
 fail:
     return ret;
 }
 
-/* prepare a new audio buffer */
 /**
- * @brief sdl_audio_callback
- * @param userdata    指向user的数据
- * @param stream      拷贝PCM的地址
- * @param len         需要拷贝的长度
+ * @brief SDL 音频回调函数，用于向 SDL 音频设备提供解码后的音频数据。
+ *
+ * 该函数由 SDL 音频子系统在需要填充音频缓冲区时自动调用。它负责从 FFPlayer 上下文中获取已解码的音频帧，
+ * 并将其复制到 SDL 提供的输出流中。如果内部缓冲区耗尽，则会触发新的音频帧解码。
+ *
+ * @param userdata 用户自定义数据指针，此处指向 FFPlayer 实例。
+ * @param stream   指向 SDL 音频缓冲区的指针，用于写入音频数据。
+ * @param len      需要填充的音频数据长度（字节数）。
  */
 static void sdl_audio_callback(void *userdata, uint8_t *stream, int len)
 {
     FFPlayer *ffp = (FFPlayer *)userdata;
     int audio_size = 0;
-    int len1 = 0;
+    int len1 = 0;   
 
+    // 循环处理，直到填满 SDL 请求的全部音频数据长度
     while(len > 0)
     {
+        // 循环读取，直到读取到足够的数据
+        /* (1)如果is->audio_buf_index < is->audio_buf_size则说明上次拷贝还剩余一些数据，
+         * 先拷贝到stream再调用audio_decode_frame
+         * (2)如果audio_buf消耗完了，则调用audio_decode_frame重新填充audio_buf
+         */
+
+        // 当内部音频缓冲区的数据已被完全读取时，解码下一帧音频数据
         if(ffp->audio_buf_index >= ffp->audio_buf_size)
         {
-            audio_size = audio_decode_frame(ffp);
+            audio_size = audio_decode_frame(ffp);// 返回有效的PCM数据长度
             if(audio_size < 0)
             {
+                // 静音的逻辑
+                /* if error, just output silence */
                 ffp->audio_buf = nullptr;
                 ffp->audio_buf_size = SDL_AUDIO_MIN_BUFFER_SIZE / ffp->audio_tgt.frame_size * ffp->audio_tgt.frame_size;
             }
@@ -512,17 +525,78 @@ static void sdl_audio_callback(void *userdata, uint8_t *stream, int len)
             }
             ffp->audio_buf_index = 0; // 重置索引
         }
+        
+        // 计算本次可拷贝的数据量：取剩余未读数据长度与 SDL 请求长度的较小值
         len1 = ffp->audio_buf_size - ffp->audio_buf_index;
         len1 = FFMIN(len1, len);
 
+        // 将内部缓冲区中的数据拷贝到 SDL 输出流
         if(ffp->audio_buf)
             memcpy(stream, (uint8_t *)ffp->audio_buf + ffp->audio_buf_index, len1);
-        len -= len1;      // 读了多少数据后，len要减少相应的长度
-        stream += len1;   // stream 拷贝的位置也发生偏移
+        
+        // 更新剩余需要填充的长度、输出流指针位置以及内部缓冲区的读取索引
+        len -= len1;      
+        stream += len1;   
         /* 更新ffp->audio_buf_index，指向audio_buf中未被拷贝到stream的数据（剩余数据）的起始位置 */
         ffp->audio_buf_index += len1;
+    }
 }
 
+int FFPlayer::audio_open(uint64_t wanted_channel_layout, int wanted_nb_channels, int wanted_sample_rate,struct AudioParams *audio_hw_params)
+{ 
+    // 1. 配置 SDL 期望的音频规格
+    SDL_AudioSpec wanted_spec; // SDL音频参数
+    wanted_spec.freq = wanted_sample_rate;  // 采样率
+    wanted_spec.format = AUDIO_S16SYS;      // 采样格式 SDL的宏
+    wanted_spec.channels = wanted_nb_channels;// 声道数（2）
+    wanted_spec.silence = 0;                // 静音
+
+    // 样本数量：决定 SDL 音频回调函数的触发频率。
+    // 公式: 持续时间(ms) = samples * 1000 / freq
+    // 2048 samples / 44100Hz ≈ 46.4ms 调用一次回调
+    wanted_spec.samples = 2048;             // 23.2ms -> 46.4ms 每次读取的采样数量，多久产生一次回调和 samples
+    wanted_spec.callback = sdl_audio_callback;  // 设置音频数据填充回调函数
+    wanted_spec.userdata = this;                //将 FFPlayer 实例指针传给回调，以便在回调中访问成员变量
+
+    // 2. 打开 SDL 音频设备
+    // SDL_OpenAudio 会尝试按照 wanted_spec 打开设备. 第二个硬件支持的参数暂不考虑
+    if(SDL_OpenAudio(&wanted_spec, nullptr) != 0)
+    {
+        LOG(LogLevel::ERROR) << "SDL_OpenAudio() failed";
+        return -1;
+    }
+
+    // 3. 同步 FFmpeg 音频参数 (用于后续的重采样配置)
+    // 我们将 SDL 实际确定的输出格式保存下来，作为音频重采样的“目标格式”。
+    // 即：无论输入音频是什么格式，最终都要重采样成这个格式交给 SDL
+    audio_hw_params->format = AV_SAMPLE_FMT_S16; //  FFmpeg 的枚举值,和上面的format对应的内存布局是一样的，都是16位PCM
+    audio_hw_params->freq = wanted_spec.freq; // 实际输出的采样率
+    audio_hw_params->channels = wanted_spec.channels;// 实际声道数
+    audio_hw_params->channel_layout = wanted_channel_layout;
+
+    // 4. 预计算常用音频参数，避免在音频回调中重复计算
+    // frame_size: 单个采样点在多声道下的总字节数 (例如: 2 channels * 2 bytes/sample = 4 bytes)
+    audio_hw_params->frame_size = av_samples_get_buffer_size(nullptr, audio_hw_params->channels,
+                                                                1, // 仅计算1个样本的时间跨度
+                                                                audio_hw_params->format, 1);
+    // bytes_per_sec: 每秒产生的音频数据字节数，用于计算缓冲区大小或时长
+    audio_hw_params->bytes_per_sec = av_samples_get_buffer_size(nullptr, audio_hw_params->channels,
+                                                                audio_hw_params->freq,  // 44100(1秒内的样本数)
+                                                                audio_hw_params->format, 1);
+    if (audio_hw_params->bytes_per_sec <= 0 || audio_hw_params->frame_size <= 0) {
+        av_log(NULL, AV_LOG_ERROR, "av_samples_get_buffer_size failed\n");
+        return -1;
+    }
+    // 5. 返回 SDL 内部缓冲区的大小
+    // wanted_spec.size 是 SDL 根据 samples, channels, format 计算出的单次回调最大数据量
+    // 这通常也是我们需要维护的内部音频环形缓冲区的最小合理大小
+    return wanted_spec.size;	                            /* SDL内部缓存的数据字节, samples * channels *byte_per_sample */
+}
+
+void FFPlayer::audio_close()
+{
+    SDL_CloseAudio();  // SDL_CloseAudioDevice
+}
 
 // 读取线程,这个线程的主要功能是读取输入流，解封装，解码等，最后把解码后的数据发送给UI线程进行渲染
 int FFPlayer::read_thread()
@@ -641,7 +715,7 @@ int FFPlayer::read_thread()
         }
         else
         {
-                eof = 0; // 重置eof
+            eof = 0; // 重置eof
         }
         // 插入队列，先只处理音频包
         if(pkt->stream_index == audio_stream_index)
