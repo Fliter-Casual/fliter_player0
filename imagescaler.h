@@ -125,6 +125,8 @@ public:
     // 以下3个函数是兼容 FFmpeg 的 AVFrame 数据布局的
     // 这种设计是为了适配不同的数据结构
     // 提供这三个重载函数可以让调用者无需手动转换数据结构，直接传入当前持有的对象即可进行缩放操作
+
+    // 1. 处理 AVFrame
     RET_CODE Scale(const AVFrame *src_frame, AVFrame *dst_frame)
     {
         // 如果源帧的属性与缩放器的属性不一致，则重新初始化缩放器
@@ -159,6 +161,7 @@ public:
             return RET_FAIL;
     }
 
+    // 2. 处理 VideoFrame
     RET_CODE Scale2(const VideoFrame *src_frame, VideoFrame *dst_frame)
     {
         if(src_frame->width != _src_width 
@@ -185,6 +188,7 @@ public:
             return RET_FAIL;
     }
 
+    // 3. 处理 Frame (嵌套结构）
     RET_CODE Scale3(const Frame *src_frame,VideoFrame *dst_frame)
     {
         if(src_frame->width != _src_width 
