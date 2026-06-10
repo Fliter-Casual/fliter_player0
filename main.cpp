@@ -16,6 +16,7 @@ void force_sdl_directsound()
 #undef main
 int main(int argc, char *argv[])
 {
+    force_sdl_directsound();
     QApplication a(argc, argv);
     MainWindow w;
     w.show();
