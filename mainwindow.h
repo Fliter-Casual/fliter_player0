@@ -24,6 +24,9 @@ public:
     //  消息循环函数
     int message_loop(void *arg);
 
+    //  输出视频帧的函数
+    int OutputVideo(const Frame *frame);
+
     //  播放或者暂停的槽函数
     void OnPlayOrPause();
 

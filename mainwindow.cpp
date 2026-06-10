@@ -72,6 +72,19 @@ int MainWindow::message_loop(void *arg)
     qDebug() << "message_loop leave";
 }
 
+// 输出视频帧的函数
+// 总结流程： 视频解码线程解码出一帧图像 -> 回调 OutputVideo 函数 
+// -> 通过此句代码将图像数据交给 UI 控件 -> 用户在屏幕上看到视频画面
+int MainWindow::OutputVideo(const Frame *frame)
+{
+    // 将解码后的视频帧数据传递给自定义显示控件进行渲染
+    // ui->showWindow用于显示视频的自定义控件实例，类型为 showindow
+    // 调用 showindow 类中的 Draw 成员函数(执行动作)
+    // 这个函数内部通常会使用 OpenGL、SDL 或 Qt 的 QPainter 等技术，将 frame 中的像素数据绘制到屏幕上的 showWindow 区域
+    qDebug() << "OutputVideo call";
+    return ui->showWindow->Draw(frame);
+}
+
 // 播放或者暂停的槽函数
 void MainWindow::OnPlayOrPause()
 {
@@ -91,6 +104,7 @@ void MainWindow::OnPlayOrPause()
             _mp = nullptr;
             return;
         }
+        _mp->AddVideoRefreshCallback(std::bind(&MainWindow::OutputVideo, this, std::placeholders::_1));
         // 设置url
         _mp->ijkmp_set_data_source("2_audio.mp4");
         // 准备工作,准备完成后会发送消息通知UI线程,UI线程收到消息后可以调用ijkmp_start()开始播放

@@ -5,6 +5,7 @@
 #include <mutex>
 #include <thread>
 #include <functional>
+#include "fffplay_def.h"
 #include "fffplay.h"  //真正意义上的播放器FFPlayer ffplayer在这里
 #include "ffmsg_queue.h"
 
@@ -151,6 +152,8 @@ public:
     void ijkmp_set_playback_volume(float volume);
 
     int ijkmp_msg_loop(void *arg);
+
+    void AddVideoRefreshCallback(std::function<int(const Frame *)> callback);
 
 private:
     // 互斥量

@@ -152,6 +152,11 @@ int IjkPlayerCore::ijkmp_msg_loop(void *arg)
     return 0;
 }
 
+void IjkPlayerCore::AddVideoRefreshCallback(std::function<int(const Frame *)> callback)
+{
+    _ffplayer->AddVideoRefreshCallback(callback);
+}
+
 
 
 

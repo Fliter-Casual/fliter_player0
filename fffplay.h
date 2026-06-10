@@ -1,6 +1,7 @@
 #ifndef FFFPLAY_H
 #define FFFPLAY_H
 #include <thread>
+#include <functional>
 #include "ffmsg_queue.h"
 #include "fffplay_def.h"
 
@@ -108,6 +109,33 @@ public:
     // 负责读取和解码的后台线程对象
     std::thread *_read_thread = nullptr;
 
+    /**
+     * @brief 视频刷新线程
+     *
+     * 负责：
+     * - 按 PTS 定时刷新视频帧
+     * - 驱动 video_refresh()
+     * - 控制音视频同步
+     *
+     * @return 线程退出码
+     */
+    int video_refresh_thread();
+
+    /**
+     * @brief 执行一次视频刷新
+     *
+     * 根据系统时钟决定是否显示新帧，
+     * 并通过 remaining_time 返回下一次刷新等待时间。
+     *
+     * @param remaining_time 距离下一帧需要等待的时间（秒）
+     */
+    void video_refresh(double *remaining_time);
+    // 视频画面输出相关
+    std::thread *_video_refresh_thread = nullptr;
+    std::function<int(const Frame *)> _video_refresh_callback = nullptr;
+    void AddVideoRefreshCallback(std::function<int(const Frame *)> callback);
+
+
     // 帧队列
     FrameQueue pictq;       // 视频Frame队列
     FrameQueue sampq;       // 采样Frame队列
@@ -130,11 +158,11 @@ public:
     AVFormatContext *ic = nullptr;
 
     // 音频输出相关
-    struct AudioParams audio_src;   // 音频包解码后的frame参数
-    struct AudioParams audio_tgt;   // 音频输出参数,即SDL支持的音频参数，重采样转换参数，audio_src->audio_tgt
+    struct AudioParams audio_src;   // 音频包解码后的frame参数(最新解码的音频参数)
+    struct AudioParams audio_tgt;   // 音频输出参数,即SDL支持的音频参数(SDL音频输出需要的参数)，重采样转换参数，audio_src->audio_tgt
     struct SwrContext *swr_ctx = nullptr; // 重采样器上下文
     int audio_hw_buf_size = 0;  // 音频硬件缓冲区大小,SDL音频缓冲区大小(单位为字节)
-    // 指向待播放的一帧音频数据，指向的数据区将被考入SDL音频缓冲区，若经过重采样则指向audio_buf1，否则指向frame中的音频数据
+    // 指向待播放的一帧音频数据，指向的数据区将被拷入SDL音频缓冲区，若经过重采样则指向audio_buf1，否则指向frame中的音频数据
     uint8_t *audio_buf = nullptr; // 音频缓冲区,用于存储解码后的音频数据(原始PCM)，即可能需要重采样的数据，来自解码器，如avcodec_receive_frame()
     uint8_t *audio_buf1 = nullptr;// 音频缓冲区1,用于存储重采样后的音频数据,真正送给声卡播放的数据,由 swr_convert()输出
     unsigned int audio_buf_size = 0;  // 待播放的音频数据(audio_buf指向的)的大小,还有多少字节没有播完(剩余的数据量),用于播放进度控制

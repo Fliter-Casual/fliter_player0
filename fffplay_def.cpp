@@ -362,7 +362,7 @@ void frame_queue_next(FrameQueue *f)
 }
 
 /* return the number of undisplayed frames in the queue */
-/* 获取当前帧队列中剩余帧数 */
+/* 获取当前帧队列中剩余帧数，=0说明队列已空*/
 int frame_queue_nb_remaining(FrameQueue *f)
 {
     SDL_LockMutex(f->mutex);

@@ -111,6 +111,7 @@ int FFPlayer::stream_open(const char *file_name)
     _read_thread = new std::thread(&FFPlayer::read_thread, this);
 
     // 创建视频刷新线程
+    _video_refresh_thread = new std::thread(FFPlayer::video_refresh_thread,this);
     return 0;
 
 // 集中错误处理,保证“要么全成功，要么全清理”,且代码可读性好
@@ -309,12 +310,11 @@ void FFPlayer::stream_component_close(int stream_index)
         break;
     case AVMEDIA_TYPE_VIDEO:
         LOG(LogLevel::DEBUG) << "stream_component_close() video.";
-        // 停止视频解码线程
-        // decoder_abort(&is->viddec, &is->pictq);
-        // 释放视频解码器
-        // decoder_destroy(&is->viddec);
-        // 释放视频解码器实例
-        // avcodec_free_context()
+        // 请求退出视频画面刷新线程
+        if(_video_refresh_thread && _video_refresh_thread->joinable())
+        {
+            _video_refresh_thread->join(); // 等待线程退出
+        }
 
         // 请求终止解码器线程
         // 关闭音频设备
@@ -370,7 +370,7 @@ static int audio_decode_frame(FFPlayer *is)
                                            af->frame->nb_samples, // 样本数量
                                            (enum AVSampleFormat)af->frame->format, 1);
     // 获取声道布局
-    dec_channel_layout = (af->frame->channel_layout && af->frame->channels == av_get_channel_layout_nb_channels(af->frame->channel_layout)) ?
+    dec_channel_layout = 2;(af->frame->channel_layout && af->frame->channels == av_get_channel_layout_nb_channels(af->frame->channel_layout)) ?
                          af->frame->channel_layout : av_get_default_channel_layout(af->frame->channels);
     // 获取样本数校正值: 若同步时钟是音频，则不调整样本数: 否则根据同步需要调整样本数
 //    wanted_nb_samples = synchronize_audio(is, af->frame->nb_samples);  // 目前不考虑非音视频同步的是情况
@@ -725,6 +725,11 @@ int FFPlayer::read_thread()
                    pkt->pts/48, pkt->dts, pkt->duration, pkt->size);
             packet_queue_put(&audioq, pkt);
         }
+        else if(pkt->stream_index == video_stream_index)
+        {
+            printf("video ===== pkt pts:%ld, dts:%ld\n", pkt->pts/48, pkt->dts);
+            packet_queue_put(&videoq, pkt); // 音视频分离后的数据入队列
+        }
         else
         {
             av_packet_unref(pkt); // 不入队列则直接释放packet
@@ -737,6 +742,100 @@ fail:
     return 0;
 }
 
+
+/* 
+ * 视频刷新轮询(polls)间隔 (秒)
+ * 该值应小于视频帧间隔 (1/FPS)，以确保能及时捕获到需要渲染的时刻。
+ * 例如 60FPS 的视频，帧间隔约 0.016s，设置 0.01s (10ms) 可以保证每帧都被检测到。
+ */
+#define REFRESH_RATE 0.01  // 每帧休眠10ms
+
+/**
+ * @brief 视频刷新控制线程 (Video Refresh Thread)
+ * 
+ * 这是一个独立的后台线程，负责以固定的高频节奏驱动视频画面的更新。
+ * 它不直接解码视频，而是充当“节拍器”，定期调用 video_refresh() 检查是否到了显示下一帧的时间。
+ */
+int FFPlayer::video_refresh_thread()
+{
+    double remaining_time = 0.0; // 剩余等待时间，用于精确控制休眠时长，实现音视频同步或帧率控制
+    while (!abort_request) {
+        // 1. 精确休眠：如果计算出的剩余等待时间大于0，则让出CPU，避免忙等待消耗资源
+        if (remaining_time > 0.0)
+            // av_usleep 参数单位为微秒 (us)
+            av_usleep((int)(int64_t)(remaining_time * 1000000.0));
+        
+        // 2. 重置基准时间：每次循环开始，设定下一个检测周期为 REFRESH_RATE
+        remaining_time = REFRESH_RATE;
+
+        // 3. 执行刷新逻辑：
+        //    - 检查队列中是否有待显示帧
+        //    - 判断当前系统时间是否达到了该帧的显示时间 (PTS)
+        //    - 如果到了时间，通过回调函数将帧发送给UI层渲染
+        //    - remaining_time 会被 video_refresh 内部修改，返回“距离下一帧还需要等待多久”
+        video_refresh(&remaining_time);
+    }
+    std::cout << __FUNCTION__ << " leave" << std::endl;
+}
+
+/**
+ * @brief 视频刷新核心逻辑 (Video Refresh Logic)
+ * 
+ * 被 video_refresh_thread 周期性调用。负责从帧队列中获取即将显示的帧，
+ * 并触发渲染回调。
+ * 
+ * @param remaining_time [out] 输出参数。函数内部会计算并更新“距离下一帧显示所需的等待时间”。
+ *                             调用者可根据此值进行精确休眠。
+ */
+void FFPlayer::video_refresh(double *remaining_time)
+{
+    Frame *vp = NULL;
+    // 目前我们先是只有队列里面有视频帧可以播放，就先播放出来
+    // 判断有没有视频画面
+    if(video_stream) {
+        if (frame_queue_nb_remaining(&pictq) == 0) {
+            // 剩余帧数为0,没有可读的帧,什么都不用做，整个video_refresh()函数可以直接退出了
+            return;
+        }
+
+        // 2. 获取待显示帧 (Peek)
+        // 注意：这里只是“ peek ”(查看)，并没有将帧从队列中移除。
+        // 这样做是为了在帧真正显示之前，可以多次检查其 PTS (显示时间戳) 是否已到。
+        // 能跑到这里说明帧队列不为空，肯定有frame可以读取
+        vp = frame_queue_peek(&pictq);  // 读取待显示帧
+        
+        // 3. 触发渲染回调
+        // 将获取到的视频帧指针传递给 UI 层注册的回调函数进行绘制。
+        // 在实际的 ffplay 逻辑中，这里通常会包含复杂的音视频同步计算 (Sync Master/Slave)。
+        if(_video_refresh_callback)
+            _video_refresh_callback(vp);
+        else
+            std::cout << __FUNCTION__ << " video_refresh_callback_ NULL" << std::endl;
+
+        // 4. 消费帧 (Pop/Next)
+        // 帧已经发送给 UI 渲染后，将当前帧从队列头部移除，释放位置给后续解码帧。
+        // 注意：在实际生产中，通常会在确认帧已被 UI 接收或显示后再调用 next，
+        // 或者根据同步策略决定是丢弃帧 (drop) 还是重复帧 (repeat)。
+        // 当前简化逻辑：发送即消费
+        frame_queue_next(&pictq);   // 当前vp帧出队列
+
+        // TODO: 在此处应根据 vp->pts 和当前系统时钟计算真实的 remaining_time
+        // 目前代码未实现动态计算，始终使用默认的 REFRESH_RATE
+    }
+}
+
+/**
+ * @brief 注册视频刷新回调函数
+ * 
+ * UI 层通过此函数注入渲染逻辑。当视频线程准备好一帧画面时，
+ * 会调用这个 std::function 将帧数据传递回 UI 主线程或绘图上下文。
+ * 
+ * @param callback 符合签名 int(const Frame*) 的回调函数
+ */
+void FFPlayer::AddVideoRefreshCallback (std::function<int (const Frame *)> callback)
+{
+    _video_refresh_callback = callback;
+}
 
 
 
