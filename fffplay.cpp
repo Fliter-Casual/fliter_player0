@@ -183,7 +183,7 @@ int FFPlayer::stream_component_open(int stream_index)
         goto fail;
 
     // 设置pkt_timebase
-    // avctx->pkt_timebase = ic->streams[stream_index]->time_base;
+     avctx->pkt_timebase = ic->streams[stream_index]->time_base;
 
     /* 根据codec_id查找解码器 */
     codec = avcodec_find_decoder(avctx->codec_id);
@@ -290,6 +290,7 @@ void FFPlayer::stream_component_close(int stream_index)
         // 请求终止解码器线程
         audio_dec.decoder_abort(&sampq);
         // 关闭音频设备
+        audio_close();
         // 销毁解码器
         audio_dec.decoder_destroy();
         // 释放重采样器
@@ -358,8 +359,8 @@ static int audio_decode_frame(FFPlayer *is)
         // 若队列头部可读，则由af指向可读帧
         if(!(af = frame_queue_peek_readable(&is->sampq)))
             return -1;
-//        frame_queue_next(&ffp->sampq);
-//    }while(af->serial != ffp->audioq.serial);
+//        frame_queue_next(&is->sampq);
+//    }while(af->serial != is->audioq.serial);
 
 
 
@@ -369,7 +370,7 @@ static int audio_decode_frame(FFPlayer *is)
                                            af->frame->nb_samples, // 样本数量
                                            (enum AVSampleFormat)af->frame->format, 1);
     // 获取声道布局
-    dec_channel_layout = af->frame->channel_layout && af->frame->channels == av_get_channel_layout_nb_channels(af->frame->channel_layout) ?
+    dec_channel_layout = (af->frame->channel_layout && af->frame->channels == av_get_channel_layout_nb_channels(af->frame->channel_layout)) ?
                          af->frame->channel_layout : av_get_default_channel_layout(af->frame->channels);
     // 获取样本数校正值: 若同步时钟是音频，则不调整样本数: 否则根据同步需要调整样本数
 //    wanted_nb_samples = synchronize_audio(is, af->frame->nb_samples);  // 目前不考虑非音视频同步的是情况
@@ -432,7 +433,7 @@ static int audio_decode_frame(FFPlayer *is)
         // 计算对应的样本数 对应的采样格式 以及通道数，共需要多少buffer空间
         int out_size = av_samples_get_buffer_size(nullptr, is->audio_tgt.channels, out_count, is->audio_tgt.format, 0);
         int len2;   // 重采样后的音频数据中单个声道的样本数
-        if(out_size <= 0)
+        if(out_size < 0)
         {
             av_log(NULL, AV_LOG_ERROR, "av_samples_get_buffer_size() failed\n");
             ret = -1;
@@ -476,7 +477,7 @@ static int audio_decode_frame(FFPlayer *is)
         resampled_data_size = data_size;
     }
     
-    frame_queue_next(&is->pictq);  // 移除队列中的第一个元素,真正释放frame
+    frame_queue_next(&is->sampq);  // 移除队列中的第一个元素,真正释放frame
 
     ret = resampled_data_size;
 fail:
@@ -562,7 +563,7 @@ int FFPlayer::audio_open(uint64_t wanted_channel_layout, int wanted_nb_channels,
     // SDL_OpenAudio 会尝试按照 wanted_spec 打开设备. 第二个硬件支持的参数暂不考虑
     if(SDL_OpenAudio(&wanted_spec, nullptr) != 0)
     {
-        LOG(LogLevel::ERROR) << "SDL_OpenAudio() failed";
+        LOG(LogLevel::ERROR) << "SDL_OpenAudio() failed ," << SDL_GetError();
         return -1;
     }
 
@@ -637,7 +638,7 @@ int FFPlayer::read_thread()
         goto fail;
     }
     ffp_notify_msg1(this, FFP_MSG_OPEN_INPUT); // 发送消息给UI线程，通知开始打开输入文件
-    LOG(LogLevel::INFO) << "read_thread: FFP_MSG_FIND_STREAM_INFO " << _input_filename  << this;
+    LOG(LogLevel::INFO) << "read_thread: FFP_MSG_FIND_STREAM_INFO " << _input_filename  << " " <<this;
 
 
     // 获取输入流信息，填充AVFormatContext结构体
@@ -701,7 +702,7 @@ int FFPlayer::read_thread()
         ret = av_read_frame(ic, pkt); // packet要自己去释放
         if (ret < 0) // 读取失败或读取完毕了
         {
-            if (ret == AVERROR_EOF || avio_feof(ic->pb) && !eof) // 文件读取完毕
+            if ((ret == AVERROR_EOF || avio_feof(ic->pb)) && !eof) // 文件读取完毕
             {
                 eof = 1;
             }
