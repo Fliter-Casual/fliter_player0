@@ -103,6 +103,8 @@ int FFPlayer::stream_open(const char *file_name)
         goto fail;
 
     // 初始化时钟
+    //init_clock(&vidclk);
+    init_clock(&audclock);
 
     // 初始化音量等
 
@@ -345,6 +347,7 @@ void FFPlayer::stream_component_close(int stream_index)
 
 }
 
+// 音频解码
 static int audio_decode_frame(FFPlayer *is)
 {
     int data_size = 0; 
@@ -370,7 +373,7 @@ static int audio_decode_frame(FFPlayer *is)
                                            af->frame->nb_samples, // 样本数量
                                            (enum AVSampleFormat)af->frame->format, 1);
     // 获取声道布局
-    dec_channel_layout = 2;(af->frame->channel_layout && af->frame->channels == av_get_channel_layout_nb_channels(af->frame->channel_layout)) ?
+    dec_channel_layout = (af->frame->channel_layout && af->frame->channels == av_get_channel_layout_nb_channels(af->frame->channel_layout)) ?
                          af->frame->channel_layout : av_get_default_channel_layout(af->frame->channels);
     // 获取样本数校正值: 若同步时钟是音频，则不调整样本数: 否则根据同步需要调整样本数
 //    wanted_nb_samples = synchronize_audio(is, af->frame->nb_samples);  // 目前不考虑非音视频同步的是情况
@@ -476,10 +479,16 @@ static int audio_decode_frame(FFPlayer *is)
         is->audio_buf = af->frame->data[0]; // s16交错模式data[0], 平面模式fltp data[0] data[1]
         resampled_data_size = data_size;
     }
+
+    // 如果pts可用，则更新音频时钟，否则使用NAN
+    if (!isnan(af->pts))
+        is->audio_clock = af->pts;   
+    else
+        is->audio_clock = NAN;
     
     frame_queue_next(&is->sampq);  // 移除队列中的第一个元素,真正释放frame
 
-    ret = resampled_data_size;
+    ret = resampled_data_size;  
 fail:
     return ret;
 }
@@ -540,6 +549,13 @@ static void sdl_audio_callback(void *userdata, uint8_t *stream, int len)
         stream += len1;   
         /* 更新ffp->audio_buf_index，指向audio_buf中未被拷贝到stream的数据（剩余数据）的起始位置 */
         ffp->audio_buf_index += len1;
+    }
+
+    //更新音频时钟（Audio Clock），以确保播放器能够准确追踪当前的音频播放进度
+    if (!isnan(ffp->audio_clock)) 
+    {
+        // 设置时钟
+        set_clock(&ffp->audclock, ffp->audio_clock);
     }
 }
 
@@ -803,6 +819,17 @@ void FFPlayer::video_refresh(double *remaining_time)
         // 这样做是为了在帧真正显示之前，可以多次检查其 PTS (显示时间戳) 是否已到。
         // 能跑到这里说明帧队列不为空，肯定有frame可以读取
         vp = frame_queue_peek(&pictq);  // 读取待显示帧
+
+        // 对比audio的时间戳,视频时间 − 音频时间(主时钟)
+        double diff = vp->pts - get_clock(&audclock);// get_master_clock();
+
+        LOG(LogLevel::INFO) << __FUNCTION__ << "vp->pts:" << vp->pts << " - af->pts:" << get_clock(&audclock) << ", diff:" << diff ;
+
+        if(diff > 0) // 视频时间戳比音频时间戳还早(视频比音频快)
+        {
+            *remaining_time = FFMIN(*remaining_time, diff); //告诉上层“还要等多久才能显示这帧”
+            return;
+        }
         
         // 3. 触发渲染回调
         // 将获取到的视频帧指针传递给 UI 层注册的回调函数进行绘制。
@@ -835,6 +862,70 @@ void FFPlayer::video_refresh(double *remaining_time)
 void FFPlayer::AddVideoRefreshCallback (std::function<int (const Frame *)> callback)
 {
     _video_refresh_callback = callback;
+}
+
+
+/**
+ * @brief 获取主同步类型
+ * 
+ * 根据当前配置的同步类型（av_sync_type）以及音视频流的存在状态，
+ * 确定实际使用的主时钟源。如果首选的流不存在，则回退到另一种可用的流作为主时钟。
+ * 
+ * @return int 返回确定的主同步类型，可能的值包括：
+ *             - AV_SYNC_VIDEO_MASTER: 以视频时钟为主
+ *             - AV_SYNC_AUDIO_MASTER: 以音频时钟为主
+ *             - AV_SYNC_UNKNOW_MASTER: 未知或无有效主时钟
+ */
+int FFPlayer::get_master_sync_type()
+{
+    // 当配置为视频主同步时，检查视频流是否存在
+    if (av_sync_type == AV_SYNC_VIDEO_MASTER) 
+    {
+        if (video_stream)
+            return AV_SYNC_VIDEO_MASTER;
+        else
+            /* 如果没有视频成分则使用 audio master */
+            return AV_SYNC_AUDIO_MASTER;
+    } 
+    // 当配置为音频主同步时，检查音频流是否存在，若不存在则尝试回退到视频
+    else if (av_sync_type == AV_SYNC_AUDIO_MASTER) 
+    {
+        if (audio_stream)
+            return AV_SYNC_AUDIO_MASTER;
+        else if(video_stream)
+            // 只有音频的存在
+            return AV_SYNC_VIDEO_MASTER;
+        else
+            return AV_SYNC_UNKNOW_MASTER;
+    }
+}
+
+/**
+ * @brief 获取主时钟时间。
+ *
+ * 根据当前的同步类型（视频主同步或音频主同步）返回相应的主时钟值。
+ * 目前视频主同步分支被注释，默认回退到音频时钟。
+ *
+ * @return double 当前主时钟的时间值（秒）。若为视频主同步模式，由于代码被注释，返回值可能未初始化（取决于编译器行为），实际使用中应注意此逻辑缺陷。
+ */
+double FFPlayer::get_master_clock()
+{
+    double val;
+
+    // 根据同步类型选择主时钟源
+    switch (get_master_sync_type()) 
+    {
+    case AV_SYNC_VIDEO_MASTER:
+//        val = get_clock(&vidclk);
+        break;
+    case AV_SYNC_AUDIO_MASTER:
+        val = get_clock(&audclock);
+        break;
+    default:
+        val = get_clock(&audclock);
+        break;
+    }
+    return val;
 }
 
 

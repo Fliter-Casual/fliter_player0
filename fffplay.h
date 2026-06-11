@@ -135,6 +135,12 @@ public:
     std::function<int(const Frame *)> _video_refresh_callback = nullptr;
     void AddVideoRefreshCallback(std::function<int(const Frame *)> callback);
 
+    int get_master_sync_type();
+    double get_master_clock();
+    int av_sync_type = AV_SYNC_AUDIO_MASTER;            // 音视频同步类型, 默认audio master
+    Clock audclock;                                  // 音频时钟
+    //Clock vidclock;                                // 视频时钟
+    double audio_clock = 0;            // 当前音频帧的PTS+当前帧Duration
 
     // 帧队列
     FrameQueue pictq;       // 视频Frame队列

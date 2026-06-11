@@ -383,3 +383,69 @@ int64_t frame_queue_last_pos(FrameQueue *f)
 //    else
         return -1;
 }
+
+/**
+ * @brief 获取时钟的当前时间值。
+ * 
+ * 获取到的实际上是:最后一帧的pts 加上 从处理最后一帧开始到现在的时间,具体参考set_clock_at 和get_clock的代码
+ * 
+ * c->pts_drift=最后一帧的pts-从处理最后一帧时间
+ * 
+ * clock=c->pts_drift+现在的时候
+ * 
+ * get_clock(&is->vidclk) ==is->vidclk.pts, av_gettime_relative() / 1000000.0 -is->vidclk.last_updated  +is->vidclk.pts
+ *
+ * 该函数通过获取当前的相对时间，并结合时钟的PTS漂移量（pts_drift），
+ * 计算出校正后的时钟时间。
+ *
+ * @param c 指向Clock结构体的指针，包含时钟状态信息（如pts_drift）。
+ * @return double 返回校正后的时钟时间（单位：秒）。
+ */
+double get_clock(Clock *c)
+{
+    // 获取当前相对时间并转换为秒 ,  av_gettime_relative()获取自某个未指定起始点以来的当前时间，单位为微秒
+    double time = av_gettime_relative() / 1000000.0;
+    return c->pts_drift + time  ;
+}
+
+/**
+ * @brief 设置时钟的当前时间。
+ * 
+ * 该函数用于设置时钟的当前时间，并计算出时钟的PTS漂移量（pts_drift）。
+ *
+ * @param c 指向Clock结构体的指针，包含时钟状态信息（如pts_drift）。
+ * @param pts 当前帧的PTS值。
+ * @param time 当前帧的更新时间。
+ */
+void set_clock_at(Clock *c, double pts, double time)
+{
+    c->pts		= pts;                      /* 当前帧的pts */
+//    c->last_updated = time;                 /* 最后更新的时间，实际上是当前的一个系统时间 */
+    c->pts_drift	= c->pts - time;        /* 当前帧pts和系统时间的差值，正常播放情况下两者的差值应该是比较固定的，因为两者都是以时间为基准进行线性增长 */
+}
+
+
+/**
+ * @brief 设置时钟的当前时间。
+ * 该函数用于设置时钟的当前时间，并计算出时钟的PTS漂移量（pts_drift）。此函数封装了set_clock_at()函数
+ *
+ * @param c 指向Clock结构体的指针，包含时钟状态信息（如pts_drift）。
+ * @param pts 当前帧的PTS值。
+ */
+void set_clock(Clock *c, double pts)
+{
+    double time = av_gettime_relative() / 1000000.0;
+    set_clock_at(c, pts, time);
+}
+
+/**
+ * @brief 初始化时钟。
+ *
+ * 该函数用于初始化时钟，将时钟的PTS设置为Not-a-Number（NAN）。
+ *
+ * @param c 指向Clock结构体的指针，包含时钟状态信息（如pts_drift）。
+ */
+void init_clock(Clock *c)
+{
+    set_clock(c, NAN);
+}
