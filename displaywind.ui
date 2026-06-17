@@ -2,8 +2,8 @@
  <author/>
  <comment/>
  <exportmacro/>
- <class>playlist</class>
- <widget name="playlist" class="QWidget">
+ <class>displaywind</class>
+ <widget name="displaywind" class="QWidget">
   <property name="geometry">
    <rect>
     <x>0</x>

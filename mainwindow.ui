@@ -6,102 +6,74 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1280</width>
-    <height>800</height>
+    <width>1040</width>
+    <height>645</height>
    </rect>
   </property>
+  <property name="minimumSize">
+   <size>
+    <width>400</width>
+    <height>200</height>
+   </size>
+  </property>
   <property name="windowTitle">
-   <string>MainWindow</string>
+   <string>Fliter播放器</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QGridLayout" name="gridLayout">
-    <property name="leftMargin">
-     <number>0</number>
+   <widget class="QWidget" name="ctrlBarWindow" native="true">
+    <property name="geometry">
+     <rect>
+      <x>0</x>
+      <y>520</y>
+      <width>1040</width>
+      <height>95</height>
+     </rect>
     </property>
-    <property name="topMargin">
-     <number>0</number>
+    <property name="minimumSize">
+     <size>
+      <width>800</width>
+      <height>95</height>
+     </size>
     </property>
-    <property name="rightMargin">
-     <number>0</number>
-    </property>
-    <property name="bottomMargin">
-     <number>0</number>
-    </property>
-    <property name="spacing">
-     <number>0</number>
-    </property>
-    <item row="1" column="0">
-     <widget class="QWidget" name="ctrlBarWindow" native="true">
-      <property name="minimumSize">
-       <size>
-        <width>0</width>
-        <height>0</height>
-       </size>
-      </property>
-      <layout class="QVBoxLayout" name="verticalLayout">
-       <property name="spacing">
-        <number>0</number>
-       </property>
-       <property name="leftMargin">
-        <number>0</number>
-       </property>
-       <property name="topMargin">
-        <number>0</number>
-       </property>
-       <property name="rightMargin">
-        <number>0</number>
-       </property>
-       <property name="bottomMargin">
-        <number>0</number>
-       </property>
-       <item>
-        <widget class="showindow" name="showWindow" native="true"/>
-       </item>
-       <item>
-        <widget class="CtrlBar" name="showCtrlBar" native="true">
-         <property name="minimumSize">
-          <size>
-           <width>0</width>
-           <height>0</height>
-          </size>
-         </property>
-        </widget>
-       </item>
-      </layout>
-     </widget>
-    </item>
-   </layout>
+    <widget class="showindow" name="showWindow" native="true">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>0</y>
+       <width>1040</width>
+       <height>310</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="CtrlBar" name="showCtrlBar" native="true">
+     <property name="geometry">
+      <rect>
+       <x>0</x>
+       <y>310</y>
+       <width>1040</width>
+       <height>309</height>
+      </rect>
+     </property>
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>0</height>
+      </size>
+     </property>
+    </widget>
+   </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1280</width>
+     <width>1040</width>
      <height>26</height>
     </rect>
    </property>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
-  <widget class="QDockWidget" name="playerlistdockWidget">
-   <property name="minimumSize">
-    <size>
-     <width>200</width>
-     <height>124</height>
-    </size>
-   </property>
-   <attribute name="dockWidgetArea">
-    <number>2</number>
-   </attribute>
-   <widget class="playlist" name="playListContents">
-    <property name="minimumSize">
-     <size>
-      <width>140</width>
-      <height>100</height>
-     </size>
-    </property>
-   </widget>
-  </widget>
   <widget class="QDockWidget" name="titleDockWidget">
    <property name="minimumSize">
     <size>
@@ -113,6 +85,25 @@
     <number>4</number>
    </attribute>
    <widget class="TitleBar" name="titleContents"/>
+  </widget>
+  <widget class="QDockWidget" name="playerlistdockWidget">
+   <property name="minimumSize">
+    <size>
+     <width>200</width>
+     <height>124</height>
+    </size>
+   </property>
+   <attribute name="dockWidgetArea">
+    <number>1</number>
+   </attribute>
+   <widget class="playlist" name="playListContents">
+    <property name="minimumSize">
+     <size>
+      <width>140</width>
+      <height>100</height>
+     </size>
+    </property>
+   </widget>
   </widget>
  </widget>
  <customwidgets>

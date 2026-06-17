@@ -17,37 +17,34 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
     Logger.cpp \
-    ctrlbar.cpp \
+    dialog.cpp \
+    displaywind.cpp \
     fffplay.cpp \
     fffplay_def.cpp \
     ffmsg_queue.cpp \
     ijkplayercore.cpp \
     main.cpp \
     mainwindow.cpp \
-    playlist.cpp \
-    showindow.cpp \
-    titlebar.cpp
+    playlist.cpp
 
 HEADERS += \
     Logger.hpp \
     Mutex.hpp \
-    ctrlbar.h \
+    dialog.h \
+    displaywind.h \
     fffplay.h \
     fffplay_def.h \
     ffmsg.h \
     ffmsg_queue.h \
     ijkplayercore.h \
     mainwindow.h \
-    playlist.h \
-    showindow.h \
-    titlebar.h
+    playlist.h
 
 FORMS += \
-    ctrlbar.ui \
+    dialog.ui \
+    displaywind.ui \
     mainwindow.ui \
-    playlist.ui \
-    showindow.ui \
-    titlebar.ui
+    playlist.ui
 
 win32 {
 INCLUDEPATH += $$PWD/SDL2-2.0.10/include
