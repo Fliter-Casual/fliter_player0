@@ -4,6 +4,7 @@
 #include <functional>
 #include "ffmsg_queue.h"
 #include "fffplay_def.h"
+#include "sonic.h"
 
 /*
  可优化点汇总（Decoder 类）：
@@ -45,12 +46,18 @@ class Decoder
 public:
     Decoder();
     ~Decoder();
+    int _packet_pending = 0;
     AVPacket _pkt;              
     PacketQueue *_queue = nullptr;         // 数据包队列
     AVCodecContext *_avcodec_ctx = nullptr;// 解码器上下文
     int _pkt_serial = 0;             // 数据包序列号
     int _finished = 0;               // =0，解码线程正常运行，还可以继续送包,取帧；=非0，输入队列 EOF/解码完成 或 异常退出/flush/seek
-    std::thread _decoder_thread;
+    std::thread _decoder_thread ;
+
+    int64_t start_pts;
+    AVRational start_pts_tb;
+    int64_t next_pts;
+    AVRational next_pts_tb;
     // 初始化解码器
     void decoder_init(AVCodecContext *avcodec_ctx,PacketQueue *queue);
     // 创建和启动线程
@@ -100,48 +107,78 @@ public:
 
     void audio_close();
 
-    MessageQueue _msg_queue; // 消息队列
-    char *_input_filename = nullptr; // 输入文件名
+    //获取播放时长
+    long ffp_get_duration_l();
+    long ffp_get_current_position_l();
 
-    // 线程的执行函数(线程入口函数)
-    int read_thread();// 读取线程, 这个线程的主要功能是读取输入流，解封装，解码等，最后把解码后的数据发送给UI线程进行渲染
+    // 暂停恢复
+    int ffp_pause_l();
+    void toggle_pause(int pause_on);
+    void toggle_pause_l(int pause_on);
+    void stream_update_pause_l();
+    void stream_toggle_pause_l(int pause_on);
 
-    // 负责读取和解码的后台线程对象
-    std::thread *_read_thread = nullptr;
+    // seek相关
+    int ffp_seek_to_l(long msec);
+    // 单位是秒 整数
+    int ffp_forward_to_l(long incr);
+    // 单位是秒 负数
+    int ffp_back_to_l(long incr);
+    int ffp_forward_or_back_to_l(long incr);
+    void stream_seek(int64_t pos, int64_t rel, int seek_by_bytes);
 
-    /**
-     * @brief 视频刷新线程
-     *
-     * 负责：
-     * - 按 PTS 定时刷新视频帧
-     * - 驱动 video_refresh()
-     * - 控制音视频同步
-     *
-     * @return 线程退出码
-     */
+    // 截屏相关
+    int ffp_screenshot_l(char *screen_path);
+    void screenshot(AVFrame *frame);
+
+    // 变速相关
+    int get_target_frequency();
+    int     get_target_channels();
+    void ffp_set_playback_rate(float rate);
+    float ffp_get_playback_rate();
+    bool is_normal_playback_rate();
+    int ffp_get_playback_rate_change();
+    void ffp_set_playback_rate_change(int change);
+
+    //音量相关
+    void ffp_set_playback_volume(int value);
+
+    //播放完毕相关判断 1. av_read_frame返回eof; 2. audio没有数据可以输出; 3.video没有数据可以输出
+    void check_play_finish();   //如果已经结束则通知ui调用停止函数
+    // 供外包获取信息
+    int64_t ffp_get_property_int64(int id, int64_t default_value);
+    void ffp_track_statistic_l(AVStream *st, PacketQueue *q, FFTrackCacheStatistic *cache);
+    void ffp_audio_statistic_l();
+    void ffp_video_statistic_l();
+    MessageQueue _msg_queue;
+    char *_input_filename;
+    int realtime = 0;
+    int  stream_has_enough_packets(AVStream *st, int stream_id, PacketQueue *queue);
+    int read_thread();
+    std::thread *_read_thread;
+
     int video_refresh_thread();
-
-    /**
-     * @brief 执行一次视频刷新
-     *
-     * 根据系统时钟决定是否显示新帧，
-     * 并通过 remaining_time 返回下一次刷新等待时间。
-     *
-     * @param remaining_time 距离下一帧需要等待的时间（秒）
-     */
     void video_refresh(double *remaining_time);
+    double vp_duration(  Frame *vp, Frame *nextvp);
+    double compute_target_delay(double delay);
+    void  update_video_pts(double pts, int64_t pos, int serial);
+
     // 视频画面输出相关
-    std::thread *_video_refresh_thread = nullptr;
-    std::function<int(const Frame *)> _video_refresh_callback = nullptr;
+    std::thread *_video_refresh_thread = NULL;
+
+    std::function<int(const Frame *)> _video_refresh_callback = NULL;
     void AddVideoRefreshCallback(std::function<int(const Frame *)> callback);
 
     int get_master_sync_type();
     double get_master_clock();
-    int av_sync_type = AV_SYNC_AUDIO_MASTER;            // 音视频同步类型, 默认audio master
-    Clock audclock;                                  // 音频时钟
-    //Clock vidclock;                                // 视频时钟
-    double audio_clock = 0;            // 当前音频帧的PTS+当前帧Duration
+    int av_sync_type = AV_SYNC_AUDIO_MASTER;           // 音视频同步类型, 默认audio master
+    Clock	audclock;             // 音频时钟
+    Clock	vidclock;             // 视频时钟
+    //    Clock	extclk;
 
+    double			audio_clock = 0;            // 当前音频帧的PTS+当前帧Duration
+    int             audio_clock_serial;     // 播放序列，seek可改变此值, 解码后保存
+    int64_t         audio_callback_time = 0;
     // 帧队列
     FrameQueue pictq;       // 视频Frame队列
     FrameQueue sampq;       // 采样Frame队列
@@ -154,6 +191,9 @@ public:
 
     AVStream *audio_stream = nullptr;   // 音频流
     AVStream *video_stream = nullptr;   // 视频流
+    int force_refresh = 0;
+    double frame_timer = 0;
+
     int audio_stream_index = -1;
     int video_stream_index = -1;
 
@@ -161,8 +201,11 @@ public:
     Decoder video_dec; // 视频解码器
 
     int eof = 0;
+    int audio_no_data = 0;
+    int video_no_data = 0;
     AVFormatContext *ic = nullptr;
 
+    int paused = 0;
     // 音频输出相关
     struct AudioParams audio_src;   // 音频包解码后的frame参数(最新解码的音频参数)
     struct AudioParams audio_tgt;   // 音频输出参数,即SDL支持的音频参数(SDL音频输出需要的参数)，重采样转换参数，audio_src->audio_tgt
@@ -174,7 +217,117 @@ public:
     unsigned int audio_buf_size = 0;  // 待播放的音频数据(audio_buf指向的)的大小,还有多少字节没有播完(剩余的数据量),用于播放进度控制
     unsigned int audio_buf1_size = 0; // 申请到的音频数据(audio_buf1指向的)的实际大小,即一次重采样后 实际产出的字节数
     int audio_buf_index = 0;        // 当前播放位置在 audio_buf（或 audio_buf1）中的偏移，记录“已经播到哪里了”，配合 audio_buf_size使用,分次把数据喂给声卡;更新拷贝位置,当前音频帧中已拷入SDL音频缓冲区
+
+
+
+    int audio_write_buf_size;
+    int audio_volume = 50;   // 音量相关
+    int startup_volume = 50; // 起始音量
+    // seek相关
+    int64_t seek_req = 0;
+    int64_t seek_rel = 0;
+    int64_t seek_flags = 0;
+    int64_t seek_pos = 0;  // seek的位置
+
+    // 截屏相关
+    bool req_screenshot_ = false;
+    char *screen_path_ = NULL;
+
+    //单步运行
+    int step = 0;
+    int framedrop = 1;
+    int frame_drops_late = 0;
+
+    int pause_req = 0;
+    int auto_resume = 0;
+    int buffering_on = 0;
+    // 变速相关
+    float       pf_playback_rate = 1.0;           // 播放速率
+    int         pf_playback_rate_changed = 0;   // 播放速率改变
+    // 变速相关
+    sonicStreamStruct *audio_speed_convert = nullptr;
+    int max_frame_duration = 3600;
+
+
+    // 统计相关的操作
+    FFStatistic         stat;
 };
+
+//    MessageQueue _msg_queue; // 消息队列
+//    char *_input_filename = nullptr; // 输入文件名
+
+//    // 线程的执行函数(线程入口函数)
+//    int read_thread();// 读取线程, 这个线程的主要功能是读取输入流，解封装，解码等，最后把解码后的数据发送给UI线程进行渲染
+
+//    // 负责读取和解码的后台线程对象
+//    std::thread *_read_thread = nullptr;
+
+//    /**
+//     * @brief 视频刷新线程
+//     *
+//     * 负责：
+//     * - 按 PTS 定时刷新视频帧
+//     * - 驱动 video_refresh()
+//     * - 控制音视频同步
+//     *
+//     * @return 线程退出码
+//     */
+//    int video_refresh_thread();
+
+//    /**
+//     * @brief 执行一次视频刷新
+//     *
+//     * 根据系统时钟决定是否显示新帧，
+//     * 并通过 remaining_time 返回下一次刷新等待时间。
+//     *
+//     * @param remaining_time 距离下一帧需要等待的时间（秒）
+//     */
+//    void video_refresh(double *remaining_time);
+//    // 视频画面输出相关
+//    std::thread *_video_refresh_thread = nullptr;
+//    std::function<int(const Frame *)> _video_refresh_callback = nullptr;
+//    void AddVideoRefreshCallback(std::function<int(const Frame *)> callback);
+
+//    int get_master_sync_type();
+//    double get_master_clock();
+//    int av_sync_type = AV_SYNC_AUDIO_MASTER;            // 音视频同步类型, 默认audio master
+//    Clock audclock;                                  // 音频时钟
+//    //Clock vidclock;                                // 视频时钟
+//    double audio_clock = 0;            // 当前音频帧的PTS+当前帧Duration
+
+//    // 帧队列
+//    FrameQueue pictq;       // 视频Frame队列
+//    FrameQueue sampq;       // 采样Frame队列
+
+//    // 包队列
+//    PacketQueue audioq;        // 音频packet队列
+//    PacketQueue videoq;         // 视频packet队列
+
+//    int abort_request = 0;
+
+//    AVStream *audio_stream = nullptr;   // 音频流
+//    AVStream *video_stream = nullptr;   // 视频流
+//    int audio_stream_index = -1;
+//    int video_stream_index = -1;
+
+//    Decoder audio_dec; // 音频解码器
+//    Decoder video_dec; // 视频解码器
+
+//    int eof = 0;
+//    AVFormatContext *ic = nullptr;
+
+//    // 音频输出相关
+//    struct AudioParams audio_src;   // 音频包解码后的frame参数(最新解码的音频参数)
+//    struct AudioParams audio_tgt;   // 音频输出参数,即SDL支持的音频参数(SDL音频输出需要的参数)，重采样转换参数，audio_src->audio_tgt
+//    struct SwrContext *swr_ctx = nullptr; // 重采样器上下文
+//    int audio_hw_buf_size = 0;  // 音频硬件缓冲区大小,SDL音频缓冲区大小(单位为字节)
+//    // 指向待播放的一帧音频数据，指向的数据区将被拷入SDL音频缓冲区，若经过重采样则指向audio_buf1，否则指向frame中的音频数据
+//    uint8_t *audio_buf = nullptr; // 音频缓冲区,用于存储解码后的音频数据(原始PCM)，即可能需要重采样的数据，来自解码器，如avcodec_receive_frame()
+//    uint8_t *audio_buf1 = nullptr;// 音频缓冲区1,用于存储重采样后的音频数据,真正送给声卡播放的数据,由 swr_convert()输出
+//    unsigned int audio_buf_size = 0;  // 待播放的音频数据(audio_buf指向的)的大小,还有多少字节没有播完(剩余的数据量),用于播放进度控制
+//    unsigned int audio_buf1_size = 0; // 申请到的音频数据(audio_buf1指向的)的实际大小,即一次重采样后 实际产出的字节数
+//    int audio_buf_index = 0;        // 当前播放位置在 audio_buf（或 audio_buf1）中的偏移，记录“已经播到哪里了”，配合 audio_buf_size使用,分次把数据喂给声卡;更新拷贝位置,当前音频帧中已拷入SDL音频缓冲区
+//};
 
 // 以下封装函数设置内联 inline :编译器会把这个函数直接展开到调用的地方，避免了函数调用的开销，提高了性能
 
