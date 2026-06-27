@@ -1,7 +1,7 @@
 #include "fffplay_def.h"
-
+#include "log/easylogging++.h"
 // 这是一个刷新包(空包),常用于SEEK或整个播放器的重置
-static AVPacket flush_pkt;
+AVPacket flush_pkt;
 
 // 在包队列中放入一个包
 static int packet_queue_put_private(PacketQueue *q, AVPacket *pkt)
@@ -202,7 +202,7 @@ static void frame_queue_unref_item(Frame *vp)
  * @param max_size 请求的最大队列大小，实际大小将受限于 FRAME_QUEUE_SIZE
  * @return        成功返回 0，失败返回负的错误码（如 AVERROR(ENOMEM)）
  */
-int frame_queue_init(FrameQueue *f, PacketQueue *pktq, int max_size)
+int frame_queue_init(FrameQueue *f, PacketQueue *pktq, int max_size,int keep_last)
 {
     int i;
     memset(f, 0, sizeof(FrameQueue));
@@ -221,7 +221,7 @@ int frame_queue_init(FrameQueue *f, PacketQueue *pktq, int max_size)
 
     f->pktq = pktq;
     f->max_size = FFMIN(max_size, FRAME_QUEUE_SIZE);
-
+    f->keep_last = !!keep_last;
     // 预分配队列中所有帧所需的 AVFrame 内存
     for (i = 0; i < f->max_size; i++)
         if (!(f->queue[i].frame = av_frame_alloc()))
@@ -351,7 +351,10 @@ void frame_queue_push(FrameQueue *f)
 //函数通常在当前帧（Frame）被解码器渲染或播放完毕之后调用。
 void frame_queue_next(FrameQueue *f)
 {
-
+    if (f->keep_last && !f->rindex_shown) {
+        f->rindex_shown = 1;
+        return;
+    }
     frame_queue_unref_item(&f->queue[f->rindex]);
     if (++f->rindex == f->max_size)
         f->rindex = 0;
@@ -393,7 +396,7 @@ int64_t frame_queue_last_pos(FrameQueue *f)
  * 
  * clock=c->pts_drift+现在的时候
  * 
- * get_clock(&is->vidclk) ==is->vidclk.pts, av_gettime_relative() / 1000000.0 -is->vidclk.last_updated  +is->vidclk.pts
+ * get_clock(&is->vidclock) ==is->vidclock.pts, av_gettime_relative() / 1000000.0 -is->vidclock.last_updated  +is->vidclock.pts
  *
  * 该函数通过获取当前的相对时间，并结合时钟的PTS漂移量（pts_drift），
  * 计算出校正后的时钟时间。
@@ -417,11 +420,12 @@ double get_clock(Clock *c)
  * @param pts 当前帧的PTS值。
  * @param time 当前帧的更新时间。
  */
-void set_clock_at(Clock *c, double pts, double time)
+void set_clock_at(Clock *c, double pts, int serial, double time)
 {
     c->pts		= pts;                      /* 当前帧的pts */
-//    c->last_updated = time;                 /* 最后更新的时间，实际上是当前的一个系统时间 */
+    c->last_updated = time;                 /* 最后更新的时间，实际上是当前的一个系统时间 */
     c->pts_drift	= c->pts - time;        /* 当前帧pts和系统时间的差值，正常播放情况下两者的差值应该是比较固定的，因为两者都是以时间为基准进行线性增长 */
+    c->serial = serial;
 }
 
 
@@ -432,10 +436,10 @@ void set_clock_at(Clock *c, double pts, double time)
  * @param c 指向Clock结构体的指针，包含时钟状态信息（如pts_drift）。
  * @param pts 当前帧的PTS值。
  */
-void set_clock(Clock *c, double pts)
+void set_clock(Clock *c, double pts, int serial)
 {
     double time = av_gettime_relative() / 1000000.0;
-    set_clock_at(c, pts, time);
+    set_clock_at(c, pts, serial, time);
 }
 
 /**
@@ -445,7 +449,17 @@ void set_clock(Clock *c, double pts)
  *
  * @param c 指向Clock结构体的指针，包含时钟状态信息（如pts_drift）。
  */
-void init_clock(Clock *c)
+void init_clock(Clock *c,int *queue_serial)
 {
-    set_clock(c, NAN);
+    c->speed = 1.0;
+    c->paused = 0;
+    c->queue_serial = queue_serial;
+    set_clock(c, NAN, -1);
+}
+
+//把 FFStatistic 结构体里的所有数据清零（重置为初始状态）
+void ffplayer_reset_statistic(FFStatistic *dcc)
+{
+    // FFStatistic用来记录播放过程中的各种“运行状态数据”
+    memset(dcc,0,sizeof(FFStatistic));
 }
