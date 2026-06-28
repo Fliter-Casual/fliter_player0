@@ -111,7 +111,7 @@
  */
 #define MP_STATE_END                9 //已销毁 (终态)
 
-
+#define  MP_SEEK_STEP            10  // 快退快进步长10秒
 
 class IjkPlayerCore
 {
@@ -132,6 +132,13 @@ public:
     int ijkmp_pause();
     // seek到指定位置
     int ijkmp_seek_to(long msec);
+    // 快进
+    int ijkmp_forward_to(long incr);
+    // 快退
+    int ijkmp_back_to(long incr);
+
+    int ijkmp_screenshot(char *file_path);
+
     // 获取播放状态
     int ijkmp_get_state();
     // 是不是播放中
@@ -149,12 +156,17 @@ public:
     // 读取消息
     int ijkmp_get_msg(AVMessage *msg, int block);
     // 设置音量
-    void ijkmp_set_playback_volume(float volume);
+    void ijkmp_set_playback_volume(int volume);
 
     int ijkmp_msg_loop(void *arg);
-
+    void ijkmp_set_playback_rate(float rate);
+    float ijkmp_get_playback_rate();
     void AddVideoRefreshCallback(std::function<int(const Frame *)> callback);
 
+    // 获取状态值
+    int64_t ijkmp_get_property_int64(int id, int64_t default_value);
+
+    void ijkmp_change_state_l(int new_state);
 private:
     // 互斥量
     std::mutex _mutex;
@@ -170,6 +182,12 @@ private:
     char *_data_source = nullptr;
     //播放器状态，例如prepared,resumed,error,completed等
     int _mp_state;  // 播放状态
+
+    int seek_req = 0;
+    long seek_msec = 0;
+
+    // 截屏请求
+    char *file_path_ = NULL;
 };
 
 #endif // PLAYERCORE_H
