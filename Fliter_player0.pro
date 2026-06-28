@@ -17,34 +17,54 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
     Logger.cpp \
-    dialog.cpp \
+    customslider.cpp \
     displaywind.cpp \
     fffplay.cpp \
     fffplay_def.cpp \
     ffmsg_queue.cpp \
+    globalhelper.cpp \
     ijkplayercore.cpp \
+    ijksdl_timer.cpp \
+    log/easylogging++.cc \
     main.cpp \
     mainwindow.cpp \
-    playlist.cpp
+    medialist.cpp \
+    playlist.cpp \
+    screenshot.cpp \
+    sonic.cpp \
+    toast.cpp \
+    urldialog.cpp
 
 HEADERS += \
     Logger.hpp \
     Mutex.hpp \
+    customslider.h \
     dialog.h \
+    displaywind.h \
     displaywind.h \
     fffplay.h \
     fffplay_def.h \
     ffmsg.h \
     ffmsg_queue.h \
+    globalhelper.h \
     ijkplayercore.h \
+    imagescaler.h \
+    ijksdl_timer.h \
+    log/easylogging++.h \
     mainwindow.h \
-    playlist.h
+    medialist.h \
+    playlist.h \
+    playlist.h \
+    screenshot.h \
+    sonic.h \
+    toast.h \
+    urldialog.h
 
 FORMS += \
-    dialog.ui \
     displaywind.ui \
     mainwindow.ui \
-    playlist.ui
+    playlist.ui \
+    urldialog.ui
 
 win32 {
 INCLUDEPATH += $$PWD/SDL2-2.0.10/include
