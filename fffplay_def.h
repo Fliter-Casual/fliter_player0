@@ -30,6 +30,63 @@ extern "C" {
 
 #include <assert.h>
 
+#include "ijksdl_timer.h"
+
+#define MAX_QUEUE_SIZE (15 * 1024 * 1024)
+#define MIN_FRAMES 25
+#define EXTERNAL_CLOCK_MIN_FRAMES 2
+#define EXTERNAL_CLOCK_MAX_FRAMES 10
+
+/* Step size for volume control in dB */
+#define SDL_VOLUME_STEP (0.75)
+
+/* no AV sync correction is done if below the minimum AV sync threshold */
+#define AV_SYNC_THRESHOLD_MIN 0.04
+/* AV sync correction is done if above the maximum AV sync threshold */
+#define AV_SYNC_THRESHOLD_MAX 0.1
+/* If a frame duration is longer than this, it will not be duplicated to compensate AV sync */
+#define AV_SYNC_FRAMEDUP_THRESHOLD 0.1
+/* no AV correction is done if too big error */
+#define AV_NOSYNC_THRESHOLD 10.0
+
+typedef struct FFTrackCacheStatistic
+{
+    int64_t duration;
+    int64_t bytes;
+    int64_t packets;
+} FFTrackCacheStatistic;
+
+
+typedef struct FFStatistic
+{
+    int64_t vdec_type;
+
+    float vfps;
+    float vdps;
+    float avdelay;
+    float avdiff;
+    int64_t bit_rate;
+
+    FFTrackCacheStatistic video_cache;
+    FFTrackCacheStatistic audio_cache;
+
+    int64_t buf_backwards;
+    int64_t buf_forwards;
+    int64_t buf_capacity;
+    SDL_SpeedSampler2 tcp_read_sampler;
+    int64_t latest_seek_load_duration;
+    int64_t byte_count;
+    int64_t cache_physical_pos;
+    int64_t cache_file_forwards;
+    int64_t cache_file_pos;
+    int64_t cache_count_bytes;
+    int64_t logical_file_size;
+    int drop_frame_count;
+    int decode_frame_count;
+    float drop_frame_rate;
+} FFStatistic;
+
+
 // 返回码
 enum RET_CODE 
 {
@@ -134,12 +191,15 @@ typedef struct Frame
 {
     AVFrame *frame; // ffmpeg解码后的数据帧
     //AVSubtitle sub; // ffmpeg解码后的字幕
-    //int serial; // 播放序列号
+    int serial; // 帧的播放序列号,在seek的操作时serial会变化
     double pts; // 播放时间戳
     double duration; // 播放持续时间
-    //int64_t pos; // 数据帧在文件中的位置
+    int64_t pos; // 数据帧在文件中的位置
     int width, height; // 帧的分辨率
     int format; // 帧的像素格式
+    AVRational sar;
+    int uploaded;
+    int flip_v;
 } Frame;
 
 /**
@@ -157,6 +217,8 @@ typedef struct FrameQueue {
     int		windex;                         /**< 写索引 (Write Index)。指向下一个可写入的位置。生产者使用此索引存入新解码的帧。 */
     int		size;                           /**< 当前队列中已存在的帧数量 */
     int		max_size;                       /**< 队列允许的最大帧数量 (通常 <= FRAME_QUEUE_SIZE) */
+    int keep_last;
+    int rindex_shown;
     SDL_mutex	*mutex;                     /**< 互斥锁，用于保护队列数据的线程安全访问 */
     SDL_cond	*cond;                      /**< 条件变量，用于线程间同步（如队列满时阻塞生产者，队列为空时阻塞消费者） */
     PacketQueue	*pktq;                      /**< 关联的数据包队列指针，用于在需要时回溯或同步 AVPacket 信息 */
@@ -169,6 +231,12 @@ typedef struct Clock {
     double	pts_drift;      // 时钟基准减去我们更新时钟
     // 当前时钟(如视频时钟)最后一次更新时间，也可称当前时钟时间
     double	last_updated;   // 最后一次更新的系统时钟
+    double	speed;          // 时钟速度控制，用于控制播放速度
+    // 播放序列，所谓播放序列就是一段连续的播放动作，一个seek操作会启动一段新的播放序列
+    int	serial;             // clock is based on a packet with this serial
+    int	paused;             // = 1 说明是暂停状态
+    // 指向packet_serial
+    int *queue_serial;      /* pointer to the current packet queue serial, used for obsolete clock detection */
 } Clock;
 
 /**
@@ -181,6 +249,10 @@ enum {
 //    AV_SYNC_EXTERNAL_CLOCK,                 // 以外部时钟为基准，synchronize to an external clock */
 };
 
+#define fftime_to_milliseconds(ts) (av_rescale(ts, 1000, AV_TIME_BASE))
+#define milliseconds_to_fftime(ms) (av_rescale(ms, AV_TIME_BASE, 1000))
+
+extern  AVPacket flush_pkt;
 // 队列相关
 int packet_queue_put(PacketQueue *q, AVPacket *pkt);//添加一个数据包到队列
 int packet_queue_put_nullpacket(PacketQueue *q, int stream_index);//添加一个空数据包到队列, 用于结束播放
@@ -192,7 +264,7 @@ void packet_queue_start(PacketQueue *q);//启动队列
 int packet_queue_get(PacketQueue *q, AVPacket *pkt, int block, int *serial);//从队列中获取一个数据包
 
 /* 初始化FrameQueue，视频和音频keep_last（只处理最新的消息，忽略旧的）设置为1，字幕设置为0 */
-int frame_queue_init(FrameQueue *f, PacketQueue *pktq, int max_size);
+int frame_queue_init(FrameQueue *f, PacketQueue *pktq, int max_size,int keep_last);
 void frame_queue_destory(FrameQueue *f);
 // 唤醒所有等待的线程
 void frame_queue_signal(FrameQueue *f); 
@@ -220,8 +292,11 @@ int64_t frame_queue_last_pos(FrameQueue *f);
 // 时钟相关
 
 double get_clock(Clock *c);
-void set_clock_at(Clock *c, double pts, double time);
-void set_clock(Clock *c, double pts);
-void init_clock(Clock *c);
+void set_clock_at(Clock *c, double pts,int serial, double time);
+void set_clock(Clock *c, double pts,int serial);
+void init_clock(Clock *c, int *queue_serial);
+
+
+void ffplayer_reset_statistic(FFStatistic *dcc);
 
 #endif //FFFPLAY_DEF_H
