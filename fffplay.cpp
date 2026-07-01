@@ -1058,7 +1058,7 @@ int FFPlayer::read_thread()
     audio_stream_index = -1;
     eof = 0;
 
-    // 创建解封装器实例，为最上层的结构体，表示输入上下文
+    // 创建解封装器实例(封装器上下文)，为最上层的结构体，表示输入上下文
     ic = avformat_alloc_context();
     if (!ic)
     {
@@ -1181,12 +1181,22 @@ int FFPlayer::read_thread()
             continue;
         }
 
-        // 读取一个packet，得到的是音视频分离后，解码前的数据
+        // 读取一个packet，得到的是音视频分离后，解码前的数据(压缩数据（H264 / AAC 等）)
         ret = av_read_frame(ic, pkt); // packet要自己去释放
         if (ret < 0) // 读取失败或读取完毕了
         {
+            //vio_feof(ic->pb)是 FFmpeg 中用于判断 AVIOContext 是否已经到达文件末尾（EOF）的函数
             if ((ret == AVERROR_EOF || avio_feof(ic->pb)) && !eof) // 文件读取完毕
             {
+                // 刷空包给队列
+                if(video_stream_index >= 0)
+                {
+                    packet_queue_put_nullpacket(&videoq,video_stream_index);
+                }
+                if(audio_stream_index >= 0)
+                {
+                    packet_queue_put_nullpacket(&audioq,audio_stream_index);
+                }
                 eof = 1;
             }
             if(ic->pb && ic->pb->error)  // io异常 / 退出循环
@@ -1257,66 +1267,185 @@ int FFPlayer::video_refresh_thread()
         //    - remaining_time 会被 video_refresh 内部修改，返回“距离下一帧还需要等待多久”
         video_refresh(&remaining_time);
     }
-    std::cout << __FUNCTION__ << " leave" << std::endl;
+    LOG(INFO) <<  " leave" ;
+    return 0;
+}
+// 计算当前视频帧的显示时长（该帧在屏幕上停留多久）,目的是让视频以正确的速度播放，实现音视频同步
+double FFPlayer::vp_duration(Frame * vp, Frame * nextvp)
+{
+    if (vp->serial == nextvp->serial) {             // 同一序列
+        double duration = nextvp->pts - vp->pts;    // 两帧时间差
+        if (std::isnan(duration) || duration <= 0 || duration >  max_frame_duration) {
+            return vp->duration / pf_playback_rate; // 用帧自带时长(PTS 异常时兜底)
+        } else {
+            return duration / pf_playback_rate;     // 用 PTS 差值(正常播放)
+        }
+    } else {
+        return 0.0;         // 不同序列 → 不显示
+    }
+}
+// 计算目标延迟,根据音视频时钟差值，调整当前帧的显示延迟，使视频跟上音频
+double FFPlayer::compute_target_delay(double delay)
+{
+    double sync_threshold, diff = 0;
+    /* update delay to follow master synchronisation source */
+    if (get_master_sync_type() != AV_SYNC_VIDEO_MASTER) {
+        /* if video is slave, we try to correct big delays by
+        duplicating or deleting a frame */
+        diff = get_clock(&vidclock) - get_master_clock();
+        /* skip or repeat frame. We take into account the
+        delay to compute the threshold. I still don't know
+        if it is the best guess */
+        // 下者约等于 delay 的 0.04 ~ 0.1 倍,可小幅调整
+        sync_threshold = FFMAX(AV_SYNC_THRESHOLD_MIN, FFMIN(AV_SYNC_THRESHOLD_MAX, delay));
+        if (! std::isnan(diff) && fabs(diff) <  max_frame_duration) {
+            if (diff <= -sync_threshold) {      // 视频加速追上音频
+                delay = FFMAX(0, delay + diff);
+            } else if (diff >= sync_threshold && delay > AV_SYNC_FRAMEDUP_THRESHOLD) { // 延迟大于阈值(大幅调整，可丢帧):视频大幅减速
+                delay = delay + diff;
+            } else if (diff >= sync_threshold) { // 视频小幅减速
+                delay = 2 * delay;
+            }
+        }
+    }
+    av_log(NULL, AV_LOG_TRACE, "video: delay=%0.3f A-V=%f\n",
+           delay, -diff);
+    return delay;
 }
 
+//更新视频时钟,将当前帧的 PTS 记录到视频时钟中，供同步计算使用
+void FFPlayer::update_video_pts(double pts, int64_t pos, int serial)
+{
+    /* update current video pts */
+    set_clock(&vidclock, pts / pf_playback_rate, serial);
+}
+
+//上面的 compute_target_delay 根据音视频时钟差值动态调整帧延迟，update_video_pts 更新视频时钟供下次同步使用。两者配合实现平滑的音视频同步
+
 /**
- * @brief 视频刷新核心逻辑 (Video Refresh Logic)
- * 
- * 被 video_refresh_thread 周期性调用。负责从帧队列中获取即将显示的帧，
- * 并触发渲染回调。
- * 
- * @param remaining_time [out] 输出参数。函数内部会计算并更新“距离下一帧显示所需的等待时间”。
- *                             调用者可根据此值进行精确休眠。
+ * @brief 视频帧渲染调度函数
+ *
+ * 这是播放器视频输出的核心函数。它决定了每一帧应该在什么时候显示，
+ * 通过音视频同步机制控制显示节奏，确保视频流畅且与音频对齐。
+ *
+ * 本函数每次调用都会检查当前帧队列的状态，并根据系统时钟和帧时间戳
+ * 决定是立即渲染当前帧，还是等待一段时间后再渲染。
+ *
+ * @param remaining_time 输出参数，返回距离下一次“应该渲染”还需要等待的时间（秒）。
+ *                        如果当前帧还不到显示时间，此值会被更新。
  */
 void FFPlayer::video_refresh(double *remaining_time)
 {
-    Frame *vp = NULL;
-    // 目前我们先是只有队列里面有视频帧可以播放，就先播放出来
-    // 判断有没有视频画面
+    Frame *vp = nullptr, *lastvp = nullptr; // vp - video picture
+
+    // 1. 检查视频流是否存在，不存在则直接返回
     if(video_stream) {
+retry: // 重试标签：当帧需要被跳过时，回到此处重新处理下一帧
+
+        // 2. 检查帧队列是否为空（没有待显示的帧）
         if (frame_queue_nb_remaining(&pictq) == 0) {
-            // 剩余帧数为0,没有可读的帧,什么都不用做，整个video_refresh()函数可以直接退出了
-            return;
+            video_no_data = 1;          // 标记无数据
+            if(eof == 1) {
+                check_play_finish();    // 文件结束，检查是否播放完毕
+            }
+            // 队列为空，无法渲染，退出函数
         }
-
-        // 2. 获取待显示帧 (Peek)
-        // 注意：这里只是“ peek ”(查看)，并没有将帧从队列中移除。
-        // 这样做是为了在帧真正显示之前，可以多次检查其 PTS (显示时间戳) 是否已到。
-        // 能跑到这里说明帧队列不为空，肯定有frame可以读取
-        vp = frame_queue_peek(&pictq);  // 读取待显示帧
-
-        // 对比audio的时间戳,视频时间 − 音频时间(主时钟)
-        double diff = vp->pts - get_clock(&audclock);// get_master_clock();
-
-        LOG(INFO) << __FUNCTION__ << "vp->pts:" << vp->pts << " - af->pts:" << get_clock(&audclock) << ", diff:" << diff ;
-
-        if(diff > 0) // 视频时间戳比音频时间戳还早(视频比音频快)
-        {
-            *remaining_time = FFMIN(*remaining_time, diff); //告诉上层“还要等多久才能显示这帧”
-            return;
-        }
-        
-        // 3. 触发渲染回调
-        // 将获取到的视频帧指针传递给 UI 层注册的回调函数进行绘制。
-        // 在实际的 ffplay 逻辑中，这里通常会包含复杂的音视频同步计算 (Sync Master/Slave)。
-        if(_video_refresh_callback)
-            _video_refresh_callback(vp);
         else
-            std::cout << __FUNCTION__ << " video_refresh_callback_ NULL" << std::endl;
+        {
+            // 3. 队列有帧，准备处理
+            video_no_data = 0;
+            double last_duration, duration, delay;
 
-        // 4. 消费帧 (Pop/Next)
-        // 帧已经发送给 UI 渲染后，将当前帧从队列头部移除，释放位置给后续解码帧。
-        // 注意：在实际生产中，通常会在确认帧已被 UI 接收或显示后再调用 next，
-        // 或者根据同步策略决定是丢弃帧 (drop) 还是重复帧 (repeat)。
-        // 当前简化逻辑：发送即消费
-        frame_queue_next(&pictq);   // 当前vp帧出队列
+            /* --- 3.1 获取帧数据 --- */
+            // 查看上一帧（用于计算当前帧的显示时长）
+            lastvp = frame_queue_peek_last(&pictq);
+            screenshot(lastvp->frame); // 截图功能（可选）
 
-        // TODO: 在此处应根据 vp->pts 和当前系统时钟计算真实的 remaining_time
-        // 目前代码未实现动态计算，始终使用默认的 REFRESH_RATE
+            // 查看当前待显示的帧（Peek 而非 Pop，暂不移出队列）
+            // 这样可以在未到显示时间时多次检查，而不会丢失帧
+            vp = frame_queue_peek(&pictq);
+
+            // 3.1.1 检查序列号：如果帧的序列号与当前视频流序列号不匹配（如跳转后），丢弃该帧
+            if(vp->serial != videoq.serial) {
+                frame_queue_next(&pictq); // 移除当前帧
+                goto retry;               // 尝试处理下一帧
+            }
+
+            // 3.1.2 序列变化：如果上一帧和当前帧序列号不同，重置时间基准
+            if(lastvp->serial != vp->serial) {
+                frame_timer = av_gettime_relative() / 1000000.0; // 重新计时
+            }
+
+            // 3.1.3 暂停处理：如果处于暂停状态，直接跳到显示步骤
+            if(paused) {
+                goto display;
+            }
+
+            /* --- 3.2 计算显示延迟（核心同步逻辑） --- */
+            // 计算上一帧的理想持续时间（根据 PTS 差值）
+            last_duration = vp_duration(lastvp, vp);
+            // 根据主时钟（通常是音频）调整目标延迟（实现音视频同步）
+            delay = compute_target_delay(last_duration);
+
+            /* --- 3.3 判断渲染时机 --- */
+            double time = av_gettime_relative() / 1000000.0; // 当前系统时间（秒）
+
+            // 如果当前时间还没到“预期显示时间 + 延迟”，说明需要等待
+            if (time < frame_timer + delay) {
+                // 计算还需要等待多久，并返回给主循环（用于 sleep）
+                *remaining_time = FFMIN(frame_timer + delay - time, *remaining_time);
+                goto display; // 不渲染，直接跳到显示步骤（但显示条件不满足，不会真正显示）
+            }
+
+            // 3.3.1 更新帧定时器：当前帧的预期显示时间累加延迟
+            frame_timer += delay;
+
+            // 3.3.2 时钟修正：如果帧延迟大于0，但系统时间已经远远超过预期（卡顿），则重置帧定时器
+            if(delay > 0 && time - frame_timer > AV_SYNC_THRESHOLD_MAX) {
+                frame_timer = time;
+            }
+
+            /* --- 3.4 更新视频时钟（用于音视频同步） --- */
+            SDL_LockMutex(pictq.mutex);
+            if(!std::isnan(vp->pts)) {
+                // 更新视频时钟为当前帧的 PTS
+                update_video_pts(vp->pts, vp->pos, vp->serial);
+            }
+            SDL_UnlockMutex(pictq.mutex);
+
+            /* --- 3.5 丢帧逻辑（Late Frame Drop） --- */
+            // 如果队列中还有下一帧，且当前帧已经“过时”，就丢弃它
+            if(frame_queue_nb_remaining(&pictq) > 1) {
+                Frame *nextvp = frame_queue_peek_next(&pictq);
+                duration = vp_duration(vp, nextvp); // 计算当前帧到下一帧的时长
+
+                // 条件：非单步模式 且 允许丢帧 且 系统时间已超过“预期显示时间 + 帧时长”
+                // 说明当前帧已经显示得太晚，应该直接丢弃
+                if (!step && (framedrop > 0 || (framedrop && get_master_sync_type() != AV_SYNC_VIDEO_MASTER))
+                    && time > frame_timer + duration) {
+                    frame_drops_late++;               // 统计丢弃的帧数
+                    frame_queue_next(&pictq);          // 丢弃当前帧
+                    goto retry;                        // 重新处理队列中的下一帧
+                }
+            }
+
+            // 3.6 帧已准备好显示：将当前帧从队列中真正移除
+            frame_queue_next(&pictq);
+            force_refresh = 1; // 标记需要刷新画面
+        }
+
+display:
+        /* --- 3.7 画面渲染 --- */
+        // 满足显示条件时，将帧数据传递给 UI 层进行绘制
+        if (force_refresh && pictq.rindex_shown) {
+            if(vp && _video_refresh_callback) {
+                _video_refresh_callback(vp); // 调用外部回调，在 UI 线程中渲染
+            }
+        }
     }
+    // 重置强制刷新标志
+    force_refresh = 0;
 }
-
 /**
  * @brief 注册视频刷新回调函数
  * 
@@ -1364,6 +1493,10 @@ int FFPlayer::get_master_sync_type()
         else
             return AV_SYNC_UNKNOW_MASTER;
     }
+    else
+    {
+        return AV_SYNC_AUDIO_MASTER;
+    }
 }
 
 /**
@@ -1382,7 +1515,7 @@ double FFPlayer::get_master_clock()
     switch (get_master_sync_type()) 
     {
     case AV_SYNC_VIDEO_MASTER:
-//        val = get_clock(&vidclock);
+        val = get_clock(&vidclock);
         break;
     case AV_SYNC_AUDIO_MASTER:
         val = get_clock(&audclock);
@@ -1403,7 +1536,6 @@ Decoder::Decoder()
 
 Decoder::~Decoder()
 {
-
 }
 
 void Decoder::decoder_init(AVCodecContext *avctx, PacketQueue *queue)
@@ -1456,7 +1588,7 @@ int Decoder::decoder_decode_frame(AVFrame *frame) // 解码一帧数据
         do  // 第一个循环，先把codec里的frame全部读取
         {
             // decoder_abort调用的时候 触发queue_->abort_request为1
-            if(_queue->abort_request) // 请求退出
+            if(_queue->abort_request) // 是否请求退出
             {
                 return -1;
             }
@@ -1466,17 +1598,18 @@ int Decoder::decoder_decode_frame(AVFrame *frame) // 解码一帧数据
                     ret = avcodec_receive_frame(_avcodec_ctx, frame);
                     if(ret >= 0)
                     {
-//                      if (decoder_reorder_pts == -1) {
-//                          frame->pts = frame->best_effort_timestamp;
-//                    } else if (!decoder_reorder_pts) {
-//                          frame->pts = frame->pkt_dts;
-//                    }
+                        LOG(INFO) << "audio frame pts:" <<  frame->pts << ", dts:" << frame->pkt_dts;
+                        if (decoder_reorder_pts == -1) {
+                              frame->pts = frame->best_effort_timestamp;
+                        } else if (!decoder_reorder_pts) {
+                              frame->pts = frame->pkt_dts;
+                        }
                     }
                     else
                     {
                         char errbuf[1024] = {0};
                         av_strerror(ret, errbuf, sizeof(errbuf));
-                        LOG(ERROR) << "avcodec_receive_frame() failed. Error code: " << ret 
+                        LOG(ERROR) << "avcodec_receive_frame() failed.video frame, Error code: " << ret
                                          << ", Details: " << errbuf;
                     }
                     break;
@@ -1484,6 +1617,7 @@ int Decoder::decoder_decode_frame(AVFrame *frame) // 解码一帧数据
                     ret = avcodec_receive_frame(_avcodec_ctx, frame);
                     if(ret >= 0)
                     {
+                        LOG(INFO) << "audio frame pts:" <<  frame->pts << ", dts:" << frame->pkt_dts;
                         AVRational time_base = {1, frame->sample_rate};
                         if (frame->pts != AV_NOPTS_VALUE)
                         {
@@ -1491,16 +1625,22 @@ int Decoder::decoder_decode_frame(AVFrame *frame) // 解码一帧数据
                             // pkt_timebase实质就是stream->time_base
                             frame->pts = av_rescale_q(frame->pts, _avcodec_ctx->pkt_timebase, time_base);
                         }
-//                      else if (d->next_pts != AV_NOPTS_VALUE) {
-//                        // 如果frame->pts不正常则使用上一帧更新的next_pts和next_pts_tb
-//                        // 转成{1, frame->sample_rate}
-//                        frame->pts = av_rescale_q(d->next_pts, d->next_pts_tb, tb);
-//                      }
+                        else if (next_pts != AV_NOPTS_VALUE)
+                        {
+                            // 如果frame->pts不正常则使用上一帧更新的next_pts和next_pts_tb
+                            // 转成{1, frame->sample_rate}
+                            frame->pts = av_rescale_q(next_pts,next_pts_tb, time_base);
+                        }
+                        if (frame->pts != AV_NOPTS_VALUE) {
+                            // 根据当前帧的pts和nb_samples预估下一帧的pts
+                            next_pts = frame->pts + frame->nb_samples;
+                            next_pts_tb = time_base; // 设置timebase
+                        }
                     }
                     else{
                         char errbuf[1024] = {0};
                         av_strerror(ret, errbuf, sizeof(errbuf));
-                        LOG(ERROR) << "avcodec_receive_frame() failed. Error code: " << ret 
+                        LOG(ERROR) << "avcodec_receive_frame() failed. audio frame,Error code: " << ret
                                          << ", Details: " << errbuf;
                     }
                     break;
@@ -1508,7 +1648,8 @@ int Decoder::decoder_decode_frame(AVFrame *frame) // 解码一帧数据
             // 检查解码是否已经结束，解码结束返回0
             if(ret == AVERROR_EOF)
             {
-                printf("avcodec_flush_buffers %s(%d)\n", __FUNCTION__, __LINE__); // 打印日志
+                _finished = _pkt_serial;
+                LOG(INFO) << "avcodec_flush_buffers pkt_serial:" << _pkt_serial;
                 avcodec_flush_buffers(_avcodec_ctx); // 刷新解码器
                 return 0;
             }
@@ -1519,28 +1660,55 @@ int Decoder::decoder_decode_frame(AVFrame *frame) // 解码一帧数据
             }
         } while (ret != AVERROR(EAGAIN)); //没帧可读时ret返回EAGIN，需要继续送packet
 
-        //  在目前这个版本我们还不去检测播放序列的问题
-        //  如果上面的循环获取到了frame这里不会被执行，第二个循环，主要是读取packet送给解码器
-//        do { //  在目前这个版本我们还不去检测播放序列的问题
-
-//        if (queue_->nb_packets == 0)  // 没有数据可读
-//            SDL_CondSignal(d->empty_queue_cond);// 通知read_thread放入packet
-
-        // 阻塞式读取一个packet
-        if(packet_queue_get(_queue, &pkt, 1, &_pkt_serial) < 0)
-        {
-            return -1; 
+        //  获取一个packet，如果播放序列不一致(数据不连续)则过滤掉“过时”的packet
+        do {
+            //  如果没有数据可读则唤醒read_thread, 实际是continue_read_thread SDL_cond
+            //            if (queue_->nb_packets == 0)  // 没有数据可读
+            //                SDL_CondSignal(empty_queue_cond);// 通知read_thread放入packet
+            //  如果还有pending的packet则使用它(_packet_pending = 有数据包待处理)
+            if (_packet_pending) {
+                av_packet_move_ref(&pkt, &_pkt);
+                _packet_pending = 0;
+            } else {
+                //  阻塞式读取packet
+                if (packet_queue_get(_queue, &pkt, 1, &_pkt_serial) < 0) {
+                    return -1;
+                }
+            }
+            if(_queue->serial != _pkt_serial) {
+                LOG(INFO) << "discontinue:queue->serial:" << _queue->serial << ", pkt_serial:" << _pkt_serial;
+                av_packet_unref(&pkt); // fixed me? 释放要过滤的packet
+            }
+        } while (_queue->serial != _pkt_serial);// 如果不是同一播放序列(流不连续)则继续读取
+        //  将packet送入解码器
+        if (pkt.data == flush_pkt.data) {//
+            // when seeking or when switching to a different stream
+            avcodec_flush_buffers(_avcodec_ctx); //清空里面的缓存帧
+            _finished = 0;        // 重置为0
+            next_pts = start_pts;     // 主要用在了audio
+            next_pts_tb = start_pts_tb;// 主要用在了audio
+        } else {
+            if (_avcodec_ctx->codec_type == AVMEDIA_TYPE_SUBTITLE) {
+                //                int got_frame = 0;
+                //                ret = avcodec_decode_subtitle2(avctx_, sub, &got_frame, &pkt);
+                //                if (ret < 0) {
+                //                    ret = AVERROR(EAGAIN);
+                //                } else {
+                //                    if (got_frame && !pkt.data) {
+                //                        packet_pending = 1;
+                //                        av_packet_move_ref(&pkt, &pkt);
+                //                    }
+                //                    ret = got_frame ? 0 : (pkt.data ? AVERROR(EAGAIN) : AVERROR_EOF);
+                //                }
+            } else {
+                if (avcodec_send_packet(_avcodec_ctx, &pkt) == AVERROR(EAGAIN)) {
+                    //                    av_log(avctx, AV_LOG_ERROR, "Receive_frame and send_packet both returned EAGAIN, which is an API violation.\n");
+                    _packet_pending = 1;
+                    av_packet_move_ref(&_pkt, &pkt);
+                }
+            }
+            av_packet_unref(&pkt);	// 一定要自己去释放音视频数据
         }
-
-//   } while (d->queue->serial != d->pkt_serial);// 如果不是同一播放序列(流不连续)则继续读取
-
-        if(avcodec_send_packet(_avcodec_ctx, &pkt) == AVERROR(EAGAIN))
-        {
-            // Receive_frame and send_packet both returned EAGAIN, which is an API violation.
-            LOG(ERROR) << "avcodec_send_packet() failed. Error code: " << ret;
-            // 先暂存这个pkt
-        }
-        av_packet_unref(&pkt); // 释放pkt
     }
 }
 
@@ -1578,8 +1746,8 @@ int Decoder::queue_picture(FrameQueue *fq, AVFrame *src_frame, double pts, doubl
 
     vp->pts = pts;
     vp->duration = duration;
-//    vp->pos = pos;
-//    vp->serial = serial;
+    vp->pos = pos;
+    vp->serial = serial;
 
     // 资源管理权限转移
     av_frame_move_ref(vp->frame, src_frame); // 将src中所有数据转移到dst中，并复位src。
@@ -1603,6 +1771,8 @@ int Decoder::audio_thread(void *arg)
     }
 
     do{
+        // 获取缓存统计情况
+        ffp->ffp_audio_statistic_l();
         // 读取解码后的帧
         if((got_frame = decoder_decode_frame(frame)) < 0) // 是否获取到一帧数据
             goto the_end; // <=0 abort
@@ -1616,10 +1786,12 @@ int Decoder::audio_thread(void *arg)
 
             // 设置Frame并放入Frame队列
             af->pts = (frame->pts == AV_NOPTS_VALUE ? NAN : frame->pts * av_q2d(time_base));// pts转换成时间戳,单位为秒
-//          af->pos = frame->pkt_pos;
-//          af->serial = is->auddec.pkt_serial;
-            //af->duration = av_q2d(time_base) * frame->nb_samples; // 设置时长
-            af->duration = av_q2d((AVRational){frame->nb_samples, frame->sample_rate}); // 时长
+            af->pos = frame->pkt_pos;
+            af->serial = ffp->audio_dec._pkt_serial;
+            AVRational temp_a;
+            temp_a.num = frame->nb_samples;
+            temp_a.den = frame->sample_rate;
+            af->duration = av_q2d(temp_a);
 
             av_frame_move_ref(af->frame, frame); // 资源管理权限转移
             frame_queue_push(&ffp->sampq);  // 放入帧队列,内部更新写索引位置(此处代表队列真正插入一帧数据)
@@ -1651,6 +1823,7 @@ int Decoder::video_thread(void *arg)
 
     for(;;) // 循环取出视频解码的帧数据
     {
+        ffp->ffp_video_statistic_l();// 统计视频packet缓存
         // 获取解码后的视频帧
         ret = get_video_frame(frame);
         if (ret < 0)

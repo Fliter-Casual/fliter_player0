@@ -192,6 +192,8 @@ public:
     AVStream *audio_stream = nullptr;   // 音频流
     AVStream *video_stream = nullptr;   // 视频流
     int force_refresh = 0;
+//    frame_timer表示「上一帧画面被真正显示到屏幕上的那个时间点」​, 单位：秒（double）
+//    它不是“这一帧的 PTS”，也不是“现在的时间”，而是播放器内部维护的“理想显示时间轴”
     double frame_timer = 0;
 
     int audio_stream_index = -1;
